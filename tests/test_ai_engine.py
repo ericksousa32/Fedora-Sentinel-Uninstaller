@@ -110,8 +110,8 @@ def test_describe_includes_last_activity(home: Path) -> None:
     make(item / "a")
     now = 1_800_000_000.0
     cand = dc_replace(candidate(item, home, 0.20), last_activity=now - 10 * 86400)
-    assert describe(cand, now=now)["days_since_last_activity"] == 10
-    assert describe(candidate(item, home, 0.20), now=now)["days_since_last_activity"] is None
+    assert describe(cand, now=now)["days_since_last_write"] == 10
+    assert describe(candidate(item, home, 0.20), now=now)["days_since_last_write"] is None
 
 
 def test_describe_sanitizes_names(home: Path) -> None:
@@ -334,3 +334,36 @@ def test_generate_refuses_cloud_names(ollama: FakeOllama) -> None:
     with pytest.raises(AiUnavailableError, match="cloud"):
         OllamaClient(ollama.url).generate("gpt-oss:120b-cloud", "{}")
     assert ollama.generate_bodies() == []
+
+
+def test_exotic_spaces_become_plain_spaces(ollama: FakeOllama, home: Path) -> None:
+    make(home / ".cache/x/a")
+    ollama.answer = lambda body: (
+        200,
+        {"verdict": "uncertain", "confidence": 0.5, "rationale": "days\u202f=\u202f0\x1b[31m"},
+    )
+    review = _review(ollama, home, [home / ".cache/x"], [0.20])
+    assert review.opinions[home / ".cache/x"].rationale == "days = 0?[31m"
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "same"),
+    [
+        (".local/share/statusify", ".local/share/com.orphoros.statusify", True),
+        (
+            ".local/share/hytale-rich-presence",
+            ".local/share/com.orbismc.hytale-rich-presence",
+            True,
+        ),
+        (".cache/nuvio", ".config/nuvio", True),
+        (".config/QtProject.conf", ".config/sealert.conf", False),
+        (".config/org.kde.Client", ".config/com.spotify.Client", False),  # generic part
+        (".config/kde.org", ".config/org", False),
+    ],
+)
+def test_group_key(home: Path, a: str, b: str, same: bool) -> None:
+    from fsu.ai_engine import group_key
+
+    ka = group_key(candidate(home / a, home, 0.20))
+    kb = group_key(candidate(home / b, home, 0.20))
+    assert (ka == kb) is same

@@ -87,10 +87,10 @@ Answer with:
   game launchers and runtimes, AI/GPU libraries, KDE/GNOME components...);
 - "uncertain": the information is not enough.
 
-"days_since_modified" refers to the item itself; "days_since_last_activity"
-is the most recent read or write of any file inside it (access times are
-updated at most once a day). A long inactivity suggests abandonment, but some
-data is legitimately rarely touched.
+"days_since_modified" refers to the item itself; "days_since_last_write" is the
+most recent modification of any file inside it. Reads are not tracked. A long
+time without writes suggests abandonment, but some data is legitimately rarely
+written.
 
 A recent modification date does NOT prove that the application is still
 installed: applications are often removed shortly after their last use. Do not
@@ -271,7 +271,9 @@ def _clean(text: str, limit: int = MAX_NAME_LENGTH, words: bool = False) -> str:
 
     With ``words=True`` the cut happens at a word boundary when possible.
     """
-    printable = "".join(c if c.isprintable() else "?" for c in text)
+    # Exotic spaces (e.g. U+202F used by some models) become plain spaces;
+    # other non-printable characters (control codes, escapes) become "?".
+    printable = "".join(c if c.isprintable() else (" " if c.isspace() else "?") for c in text)
     if len(printable) <= limit:
         return printable
     cut = printable[: limit - 1]
@@ -280,9 +282,25 @@ def _clean(text: str, limit: int = MAX_NAME_LENGTH, words: bool = False) -> str:
     return cut + "…"
 
 
+_REVERSE_DNS = re.compile(r"^[A-Za-z][\w-]*(\.[\w-]+){2,}$")
+
+
 def group_key(candidate: Candidate) -> str:
-    """Items with the same normalized name are traces of the same application."""
-    return heuristics.normalize(candidate.path.name) or candidate.path.name
+    """Items that are traces of the same application share a key.
+
+    The same name in several roots (``~/.cache/x`` and ``~/.config/x``), and a
+    reverse-DNS name with its plain form (``com.orphoros.statusify`` and
+    ``statusify``), are judged together. Only reverse-DNS names with at least
+    three components are reduced, and only to a specific last component (at
+    least 4 characters, not generic), so file names like ``QtProject.conf``
+    never merge.
+    """
+    name = candidate.path.name
+    if _REVERSE_DNS.match(name):
+        part = heuristics.useful_id_part(name)
+        if part:
+            name = part
+    return heuristics.normalize(name) or candidate.path.name
 
 
 def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
@@ -309,7 +327,7 @@ def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
         "is_symlink": candidate.is_symlink,
         "size_bytes": candidate.size_bytes,
         "days_since_modified": max(0, int((now - candidate.mtime) / 86400)),
-        "days_since_last_activity": (
+        "days_since_last_write": (
             max(0, int((now - candidate.last_activity) / 86400))
             if candidate.last_activity
             else None

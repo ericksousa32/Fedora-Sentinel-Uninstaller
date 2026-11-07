@@ -62,7 +62,7 @@ class Candidate:
     is_symlink: bool
     matched_name: str | None = None
     evidence: tuple[Evidence, ...] = ()
-    # Most recent read/write seen inside the item (0 = unknown).
+    # Most recent modification (write) inside the item; 0 = unknown.
     last_activity: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:

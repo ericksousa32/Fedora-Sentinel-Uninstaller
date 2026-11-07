@@ -174,8 +174,9 @@ fsu scan --ai --model gemma4:12b
 
 It is **off by default**: in tests on a real system, models were right on
 roughly half of the ambiguous items, so the advice is a hint, not a decision.
-Items with the same name in several locations (e.g. `~/.cache/x` and
-`~/.config/x`) are judged together, in a single request.
+Traces of the same application are judged together, in a single request: the
+same name in several locations (e.g. `~/.cache/x` and `~/.config/x`) and a
+reverse-DNS name with its plain form (`com.example.app` and `app`).
 
 The AI is an **advisor, never an executor**:
 
@@ -192,6 +193,36 @@ local service forwards to remote servers) are refused, only names and metadata a
 must match a JSON schema, and after 3 consecutive failures the remaining items
 are not sent. FSU never starts the Ollama service and never downloads models;
 if Ollama is unavailable the scan simply continues without opinions.
+
+## Known limitations and design decisions
+
+These come from testing on a real Fedora 45 (KDE Plasma) system.
+
+- **Names are only clues.** An application may store data under an old name
+  (one app wrote to `hytale-rich-presence` and later to `statusify`), or under
+  a name unrelated to its package. Only concrete evidence (removed package,
+  missing Flatpak, missing program, missing AppImage) reaches 0.70; everything
+  else stays list-only and is never moved unless you select it.
+- **Access times are not used.** Programs that sweep files (indexers, search
+  tools, launchers reading other apps' configs, backups) update them: on the
+  test system, 142 files of unrelated applications were "accessed" within the
+  same minute. FSU only uses modification times ("last write").
+- **The AI is advice only.** Across three local models it was right on roughly
+  half of the ambiguous items; it can demote an item, never promote one.
+- **Not every write is avoided.** A scan is read-only for your data, but
+  `dnf5 history` (run as your user) keeps its own log in
+  `~/.local/state/dnf5.log*` (rotated by dnf5, about 5 MB at most), and
+  listing folders updates their access times.
+- **Other users' processes are invisible** to a regular user, so files held by
+  system services cannot be detected as "in use".
+- **Moves never cross file systems or Btrfs subvolumes**; such items are blocked.
+- **systemd user units**: quarantining a unit leaves its enabling symlink in
+  `*.wants/` dangling until you restore it or run
+  `systemctl --user disable` on it.
+- **Fedora Atomic** (Silverblue, Kinoite): packages removed with `rpm-ostree`
+  are not in the DNF5 history, so fewer RPM residues reach high confidence.
+- **One operation at a time**: commands that change the quarantine take an
+  exclusive lock; a second concurrent run fails instead of racing.
 
 ## Development
 

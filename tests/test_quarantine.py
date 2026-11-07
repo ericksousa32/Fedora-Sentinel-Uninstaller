@@ -356,3 +356,11 @@ def test_execute_refuses_root(
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     with pytest.raises(RootRefusedError):
         execute(_cands(home, batch), home, store=store, snapshots=_provider(home, False))
+
+
+def test_lock_is_exclusive(home: Path) -> None:
+    first, second = QuarantineStore(home), QuarantineStore(home)
+    with first.lock(), pytest.raises(QuarantineError, match="in progress"), second.lock():
+        pass
+    with second.lock():  # released after the first block
+        pass

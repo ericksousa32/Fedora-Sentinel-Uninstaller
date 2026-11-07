@@ -275,3 +275,18 @@ def test_help_lists_commands(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     for command in ("scan", "quarantine", "list-quarantine", "restore", "purge"):
         assert command in out
+
+
+def test_dry_run_creates_nothing(cli: Cli, cli_home: Path) -> None:
+    cli("quarantine")
+    assert not (cli_home / ".local/share/fsu").exists()
+
+
+def test_concurrent_operation_is_refused(cli: Cli, cli_home: Path) -> None:
+    from fsu.quarantine import QuarantineStore
+
+    with QuarantineStore(cli_home).lock():
+        code, _out, err = cli("quarantine", "--apply", "--yes")
+    assert code == EXIT_ERROR
+    assert "in progress" in err
+    assert (cli_home / ".config/hexchat").exists()

@@ -336,24 +336,16 @@ def test_measure_file_and_directory(tmp_path: Path) -> None:
     assert stats.size_bytes == 3 + 4 + len(str((tmp_path / "d/link").readlink()))
 
 
-def test_last_activity_uses_files_not_directory_access(tmp_path: Path) -> None:
+def test_last_activity_uses_modification_times_only(tmp_path: Path) -> None:
     item = tmp_path / "app"
     _make(item / "old.db")
     _make(item / "sub/recent.log")
     old, recent = 1_000_000_000, 1_700_000_000
-    os.utime(item / "old.db", (old, old))
-    os.utime(item / "sub/recent.log", (recent - 10, recent))  # written at `recent`
+    os.utime(item / "old.db", (2_000_000_000, old))  # read "recently" by some sweeper
+    os.utime(item / "sub/recent.log", (old, recent))  # written at `recent`
     os.utime(item / "sub", (old, old))
-    os.utime(item, (2_000_000_000, old))  # directory atime (e.g. from listing) ignored
+    os.utime(item, (2_000_000_000, old))
     assert measure(item).last_activity == recent
-
-
-def test_file_access_time_counts(tmp_path: Path) -> None:
-    item = tmp_path / "app"
-    _make(item / "data")
-    os.utime(item / "data", (1_600_000_000, 1_000_000_000))  # read later than written
-    os.utime(item, (1_000_000_000, 1_000_000_000))
-    assert measure(item).last_activity == 1_600_000_000
 
 
 def test_candidate_carries_last_activity(home: Path, fake_runner: FakeRunner) -> None:

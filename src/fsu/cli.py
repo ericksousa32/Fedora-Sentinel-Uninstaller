@@ -120,10 +120,12 @@ def _warnings(ctx: Context, report: ScanReport, review: AiReview | None) -> None
         ctx.err(f"warning: {warning}")
 
 
-def _store(ctx: Context) -> QuarantineStore:
+def _store(ctx: Context, recover: bool = True) -> QuarantineStore:
+    """Quarantine store; settles interrupted operations first (callers hold the lock)."""
     store = QuarantineStore(ctx.home, clock=ctx.clock)
-    for message in store.recover():
-        ctx.err(f"recovered: {message}")
+    if recover:
+        for message in store.recover():
+            ctx.err(f"recovered: {message}")
     return store
 
 
@@ -181,7 +183,14 @@ def _print_plan(ctx: Context, result: BatchResult, title: str) -> None:
 
 def cmd_quarantine(ctx: Context, args: argparse.Namespace) -> int:
     ensure_not_root()
-    store = _store(ctx)
+    if not args.apply:
+        return _quarantine(ctx, args, _store(ctx, recover=False))
+    store = QuarantineStore(ctx.home, clock=ctx.clock)
+    with store.lock():
+        return _quarantine(ctx, args, _store(ctx))
+
+
+def _quarantine(ctx: Context, args: argparse.Namespace, store: QuarantineStore) -> int:
     report, review = _scan(ctx, args)
     candidates = list(review.candidates if review else report.candidates)
     by_path = {c.path: c for c in candidates}
@@ -274,7 +283,11 @@ def _ids(store: QuarantineStore, args: argparse.Namespace) -> list[str]:
 
 def cmd_restore(ctx: Context, args: argparse.Namespace) -> int:
     ensure_not_root()
-    store = _store(ctx)
+    with QuarantineStore(ctx.home, clock=ctx.clock).lock():
+        return _restore(ctx, args, _store(ctx))
+
+
+def _restore(ctx: Context, args: argparse.Namespace, store: QuarantineStore) -> int:
     status = EXIT_OK
     for entry_id in _ids(store, args):
         try:
@@ -287,7 +300,11 @@ def cmd_restore(ctx: Context, args: argparse.Namespace) -> int:
 
 def cmd_purge(ctx: Context, args: argparse.Namespace) -> int:
     ensure_not_root()
-    store = _store(ctx)
+    with QuarantineStore(ctx.home, clock=ctx.clock).lock():
+        return _purge(ctx, args, _store(ctx))
+
+
+def _purge(ctx: Context, args: argparse.Namespace, store: QuarantineStore) -> int:
     if args.older_than is not None:
         if args.ids or args.all:
             raise UsageError("use either IDs, --all or --older-than")

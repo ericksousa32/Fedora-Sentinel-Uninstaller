@@ -67,16 +67,16 @@ PBI_HINT = (
 class TreeStats:
     size_bytes: int
     complete: bool  # False if some part was unreadable or on another mount
-    # Most recent sign of use: file modification/access times and directory
-    # modification times. Directory *access* times are ignored on purpose:
-    # listing a directory (as this scan does) updates them.
+    # Most recent *write* inside the item (newest modification time of any file
+    # or folder). Access times are deliberately not used: any program that
+    # sweeps files (indexers, search tools, launchers scanning configs, backups)
+    # updates them, as observed on a real system where 142 files of unrelated
+    # applications were "accessed" within the same minute.
     last_activity: float
 
 
 def _activity(info: os.stat_result) -> float:
-    if stat.S_ISDIR(info.st_mode):
-        return info.st_mtime
-    return max(info.st_mtime, info.st_atime)
+    return info.st_mtime
 
 
 def measure(path: Path) -> TreeStats:

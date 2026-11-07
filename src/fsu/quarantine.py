@@ -19,6 +19,7 @@ entries left in between by a crash.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
@@ -26,7 +27,8 @@ import secrets
 import shutil
 import stat
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -126,6 +128,25 @@ class QuarantineStore:
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             if directory.is_symlink() or not directory.is_dir():
                 raise QuarantineError(f"{directory} is not a real directory")
+
+    @contextmanager
+    def lock(self) -> Iterator[None]:
+        """Exclusive lock for operations that change the quarantine.
+
+        Two FSU processes moving, restoring or purging at the same time could
+        race on the same items; the second one fails instead of waiting.
+        """
+        self._ensure_dirs()
+        path = fsu_data_dir(self.home) / ".lock"
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise QuarantineError("another FSU operation is in progress") from exc
+            yield
+        finally:
+            os.close(fd)  # closing the descriptor releases the lock
 
     def _log(self, event: str, **details: Any) -> None:
         self._ensure_dirs()
