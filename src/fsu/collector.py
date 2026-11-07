@@ -19,13 +19,10 @@ This module never creates, moves, changes or deletes files.
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import stat
-import sys
 import time
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from fsu import heuristics
@@ -405,56 +402,3 @@ def _short_list(names: list[str], limit: int = 3) -> str:
 
 def _via(match: Match) -> str:
     return f" (via '{match.variant}')" if match.variant else ""
-
-
-# -- manual run (temporary, until stage 4's cli.py) -----------------------------
-
-
-def _human_size(size: int) -> str:
-    value = float(size)
-    for unit in ("B", "KiB", "MiB", "GiB"):
-        if value < 1024 or unit == "GiB":
-            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
-    return f"{value:.1f} GiB"  # pragma: no cover
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="python -m fsu.collector",
-        description="READ-ONLY scan for application residues in $HOME.",
-    )
-    parser.add_argument("--json", action="store_true", help="JSON output")
-    parser.add_argument("--timings", action="store_true", help="print time spent per phase")
-    parser.add_argument("--home", type=Path, default=None, help="alternative home (testing)")
-    args = parser.parse_args(argv)
-
-    report = Collector(home=args.home).collect()
-    if args.json:
-        json.dump(report.to_dict(), sys.stdout, ensure_ascii=False, indent=2)
-        sys.stdout.write("\n")
-        return 0
-
-    for c in report.candidates:
-        reasons = "; ".join(e.detail for e in c.evidence)
-        print(f"{c.score:.2f}  {c.action.value:<25} {_human_size(c.size_bytes):>10}  {c.path}")
-        print(f"      └─ {reasons}")
-    total = sum(c.size_bytes for c in report.candidates)
-    print(
-        f"\n{len(report.candidates)} candidates ({_human_size(total)}); "
-        f"{len(report.protected_skipped)} protected; "
-        f"{report.installed_skipped} match something installed; "
-        f"{len(report.regenerated_skipped)} recreated by other software."
-    )
-    for launcher in report.stale_launchers:
-        print(f"stale launcher (AppImage is gone): {launcher}")
-    for warning in report.warnings:
-        print(f"warning: {warning}", file=sys.stderr)
-    if args.timings:
-        for phase, seconds in report.timings.items():
-            print(f"timing: {phase:<15} {seconds:7.2f}s", file=sys.stderr)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

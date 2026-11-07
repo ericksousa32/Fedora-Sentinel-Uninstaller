@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 from fsu.heuristics import action_for
 from fsu.models import Candidate, Category, Evidence
@@ -60,3 +64,62 @@ def renamed_sleep(directory: Path, name: str) -> Path:
     shutil.copy2(sleep, target)
     target.chmod(0o755)
     return target
+
+
+Answer = Callable[[dict[str, Any]], tuple[int, Any]]
+
+
+class FakeOllama:
+    """In-process HTTP server that mimics the parts of the Ollama API FSU uses."""
+
+    def __init__(self) -> None:
+        self.models = ["qwen2.5:7b", "nomic-embed-text:latest"]
+        self.requests: list[tuple[str, dict[str, Any] | None]] = []
+        self.answer: Answer = lambda body: (
+            200,
+            {"verdict": "uncertain", "confidence": 0.5, "rationale": "not enough data"},
+        )
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args: Any) -> None:
+                pass
+
+            def _send(self, status: int, payload: Any) -> None:
+                body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self) -> None:
+                fake.requests.append((self.path, None))
+                if self.path == "/api/version":
+                    self._send(200, {"version": "0.12.0"})
+                elif self.path == "/api/tags":
+                    self._send(200, {"models": [{"name": m} for m in fake.models]})
+                else:
+                    self._send(404, {"error": "not found"})
+
+            def do_POST(self) -> None:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length))
+                fake.requests.append((self.path, body))
+                status, answer = fake.answer(body)
+                if isinstance(answer, bytes):
+                    self._send(status, answer)
+                else:
+                    self._send(status, {"model": body["model"], "response": json.dumps(answer)})
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def generate_bodies(self) -> list[dict[str, Any]]:
+        return [b for p, b in self.requests if p == "/api/generate" and b is not None]
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()

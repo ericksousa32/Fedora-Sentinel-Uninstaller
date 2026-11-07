@@ -49,3 +49,22 @@ jobs:
           PYTHONPATH: src
           FSU_EXPECT_REMOVED: cowsay
         run: python3 -m pytest -m fedora -v
+      - name: CLI smoke test as a regular user
+        run: |
+          useradd -m fsutest
+          cp -r . /home/fsutest/repo && chown -R fsutest: /home/fsutest/repo
+          runuser -u fsutest -- bash -euxc '
+            cd ~/repo
+            export PYTHONPATH=src
+            mkdir -p ~/.config/cowsay && echo data > ~/.config/cowsay/file
+            python3 -m fsu scan
+            python3 -m fsu quarantine
+            test -d ~/.config/cowsay
+            python3 -m fsu quarantine --apply --yes
+            test ! -e ~/.config/cowsay
+            python3 -m fsu list-quarantine
+            python3 -m fsu restore --all
+            test "$(cat ~/.config/cowsay/file)" = data
+          '
+          # FSU must refuse to run as root
+          if PYTHONPATH=src python3 -m fsu scan; then exit 1; fi

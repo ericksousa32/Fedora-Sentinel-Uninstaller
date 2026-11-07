@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
 import pytest
 
 from conftest import FakeRunner, default_responses
-from fsu.collector import Collector, is_generated_stub, main, measure
+from fsu.collector import Collector, is_generated_stub, measure
 from fsu.models import Action, Candidate, Category, ScanReport
 from fsu.system import CommandError
 
@@ -333,39 +332,3 @@ def test_measure_file_and_directory(tmp_path: Path) -> None:
     size, complete = measure(tmp_path / "d")
     assert complete
     assert size == 3 + 4 + len(str((tmp_path / "d/link").readlink()))
-
-
-def test_main_json(
-    populated_home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import fsu.collector as module
-
-    runner = FakeRunner(default_responses())
-    original = module.Collector
-
-    def factory(home: Path | None = None) -> Collector:
-        return original(home=home, runner=runner, desktop_dirs=[])
-
-    monkeypatch.setattr(module, "Collector", factory)
-    assert main(["--json", "--home", str(populated_home)]) == 0
-    data = json.loads(capsys.readouterr().out)
-    paths = {Path(c["path"]).name for c in data["candidates"]}
-    assert {"hexchat", "org.gimp.GIMP"} <= paths
-    assert data["timings"]
-
-
-def test_main_text_with_timings(
-    populated_home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    import fsu.collector as module
-
-    runner = FakeRunner(default_responses())
-    original = module.Collector
-    monkeypatch.setattr(
-        module, "Collector", lambda home=None: original(home=home, runner=runner, desktop_dirs=[])
-    )
-    assert main(["--timings", "--home", str(populated_home)]) == 0
-    out, err = capsys.readouterr()
-    assert "candidates" in out
-    assert "stale launcher" in out
-    assert "timing: scan_and_score" in err

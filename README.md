@@ -5,9 +5,9 @@ on Fedora Linux: folders left in `~/.config`, `~/.local/share`, `~/.cache` and
 `~/.var/app` by RPM, Flatpak and AppImage applications that are no longer
 installed.
 
-> **Status:** under development. Stage 1 (read-only collector), stage 2
-> (safety checks and reversible quarantine) and stage 3 (local AI advisor)
-> are done as Python APIs; the command-line interface comes in stage 4.
+> **Status:** under development (`dev` branch). Collector, safety checks,
+> reversible quarantine, local AI advisor and command-line interface are in
+> place.
 
 ## Requirements
 
@@ -15,21 +15,35 @@ installed.
 - Python 3.10+, no external dependencies
 - Optional: `flatpak`
 
-## Current usage (stage 1 - read-only scan)
+## Usage
 
 ```bash
 git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git
 cd Fedora-Sentinel-Uninstaller
-PYTHONPATH=src python3 -m fsu.collector             # table
-PYTHONPATH=src python3 -m fsu.collector --json      # JSON
-PYTHONPATH=src python3 -m fsu.collector --timings   # time spent per phase
+pip install --user .        # installs the `fsu` command in ~/.local/bin
+# or, without installing:  PYTHONPATH=src python3 -m fsu <command>
 ```
 
-Run it as a **regular user** (never with `sudo`).
+Run it as a **regular user**: FSU refuses to run as root, via `sudo` or via
+`pkexec`.
+
+| Command | What it does |
+|---|---|
+| `fsu scan [--json] [--timings] [--ai]` | Read-only report of candidates |
+| `fsu quarantine` | Shows the plan; **changes nothing** |
+| `fsu quarantine --apply` | Moves the planned items to quarantine after a `[y/N]` confirmation (`--yes` for scripts) |
+| `fsu quarantine --select PATH` | Includes a list-only item (always needs a Snapper snapshot) |
+| `fsu quarantine --allow-without-snapshot` | Accepts medium-confidence items when no snapshot can be taken |
+| `fsu list-quarantine [--json]` | Items in quarantine |
+| `fsu restore ID... \| --all` | Moves items back (never overwrites) |
+| `fsu purge ID... \| --all \| --older-than DAYS` | Permanent deletion, with confirmation |
+
+Nothing is ever deleted automatically. Exit codes: `0` success, `1` error,
+`2` usage error, `3` some items were blocked.
 
 ### Reading the result
 
-| Score | Allowed action (future stages) |
+| Score | Allowed action |
 |---|---|
 | >= 0.70 | Direct quarantine |
 | 0.40 - 0.70 | Quarantine only with a preventive snapshot |
@@ -59,7 +73,7 @@ Run it as a **regular user** (never with `sudo`).
 
 A full scan takes roughly 20 seconds on a system with ~400 DNF5 transactions.
 Almost all of it is `dnf5 history info --json` itself (measure with
-`--timings`); FSU's own work takes about one second.
+`fsu scan --timings`); FSU's own work takes about one second.
 
 ## Safety principles
 
@@ -121,9 +135,14 @@ An optional second opinion from a model running in [Ollama](https://ollama.com)
 on the same machine:
 
 ```bash
-PYTHONPATH=src python3 -m fsu.ai_engine            # auto-selects an installed model
-PYTHONPATH=src python3 -m fsu.ai_engine --model qwen2.5:7b
+fsu scan --ai                       # uses an installed model
+fsu scan --ai --model gemma4:12b
 ```
+
+It is **off by default**: in tests on a real system, models were right on
+roughly half of the ambiguous items, so the advice is a hint, not a decision.
+Items with the same name in several locations (e.g. `~/.cache/x` and
+`~/.config/x`) are judged together, in a single request.
 
 The AI is an **advisor, never an executor**:
 

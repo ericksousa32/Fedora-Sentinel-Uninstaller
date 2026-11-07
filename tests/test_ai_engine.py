@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import socket
-import threading
 import time
-from collections.abc import Callable, Iterator
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,65 +20,7 @@ from fsu.ai_engine import (
     describe,
 )
 from fsu.models import Action
-from helpers import candidate, make
-
-Answer = Callable[[dict[str, Any]], tuple[int, Any]]
-
-
-class FakeOllama:
-    """In-process HTTP server that mimics the parts of the Ollama API FSU uses."""
-
-    def __init__(self) -> None:
-        self.models = ["qwen2.5:7b", "nomic-embed-text:latest"]
-        self.requests: list[tuple[str, dict[str, Any] | None]] = []
-        self.answer: Answer = lambda body: (
-            200,
-            {"verdict": "uncertain", "confidence": 0.5, "rationale": "not enough data"},
-        )
-        fake = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args: Any) -> None:
-                pass
-
-            def _send(self, status: int, payload: Any) -> None:
-                body = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def do_GET(self) -> None:
-                fake.requests.append((self.path, None))
-                if self.path == "/api/version":
-                    self._send(200, {"version": "0.12.0"})
-                elif self.path == "/api/tags":
-                    self._send(200, {"models": [{"name": m} for m in fake.models]})
-                else:
-                    self._send(404, {"error": "not found"})
-
-            def do_POST(self) -> None:
-                length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length))
-                fake.requests.append((self.path, body))
-                status, answer = fake.answer(body)
-                if isinstance(answer, bytes):
-                    self._send(status, answer)
-                else:
-                    self._send(status, {"model": body["model"], "response": json.dumps(answer)})
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-
-    def generate_bodies(self) -> list[dict[str, Any]]:
-        return [b for p, b in self.requests if p == "/api/generate" and b is not None]
-
-    def close(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
+from helpers import FakeOllama, candidate, make
 
 
 @pytest.fixture
@@ -193,7 +134,7 @@ def test_high_confidence_items_are_never_sent(
     review = _review(ollama, home, items, [0.85, 0.57, 0.20])
     assert review.available
     assert review.model == "qwen2.5:7b"  # embedding model skipped
-    sent = [json.loads(b["prompt"])["name"] for b in ollama.generate_bodies()]
+    sent = [json.loads(b["prompt"])["items"][0]["name"] for b in ollama.generate_bodies()]
     assert sent == ["medium", "low"]
     assert items[0] not in review.opinions
 
@@ -300,3 +241,38 @@ def test_missing_preferred_model(ollama: FakeOllama, home: Path, items: list[Pat
     review = engine.review([candidate(items[1], home, 0.57)])
     assert not review.available
     assert "ollama pull llama3.1:8b" in review.warnings[0]
+
+
+def test_same_application_is_judged_once(ollama: FakeOllama, home: Path) -> None:
+    paths = [home / ".cache/nuvio", home / ".config/nuvio", home / ".cache/other"]
+    for path in paths:
+        make(path / "a")
+    ollama.answer = lambda body: (
+        200,
+        {"verdict": "residue", "confidence": 0.7, "rationale": "Same app in two places."},
+    )
+    review = _review(ollama, home, paths, [0.20, 0.20, 0.20])
+    prompts = [json.loads(b["prompt"]) for b in ollama.generate_bodies()]
+    assert [p["items_found"] for p in prompts] == [2, 1]
+    assert {i["location"] for i in prompts[0]["items"]} == {"~/.cache", "~/.config"}
+    assert review.opinions[paths[0]] == replace(review.opinions[paths[1]], path=paths[0])
+    assert [c.path for c in review.candidates] == paths  # original order kept
+
+
+def test_prompt_mentions_recency_is_not_proof(ollama: FakeOllama, home: Path) -> None:
+    make(home / ".cache/x/a")
+    _review(ollama, home, [home / ".cache/x"], [0.20])
+    assert "does NOT prove" in ollama.generate_bodies()[0]["system"]
+
+
+def test_rationale_is_cut_at_a_word_boundary(ollama: FakeOllama, home: Path) -> None:
+    make(home / ".cache/x/a")
+    long_text = "word " * 100
+    ollama.answer = lambda body: (
+        200,
+        {"verdict": "uncertain", "confidence": 0.5, "rationale": long_text},
+    )
+    review = _review(ollama, home, [home / ".cache/x"], [0.20])
+    rationale = review.opinions[home / ".cache/x"].rationale
+    assert len(rationale) <= 300
+    assert rationale.endswith("word…")
