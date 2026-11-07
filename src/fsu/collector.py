@@ -361,7 +361,7 @@ class Collector:
                     evidence.append(
                         Evidence(
                             "dnf5-history",
-                            "folder owned by removed package(s): " + ", ".join(removed_owners),
+                            "folder owned by removed package(s): " + _short_list(removed_owners),
                         )
                     )
                 else:
@@ -396,6 +396,11 @@ class Collector:
             stale_launchers=appimages.stale_launchers,
             timings=timings,
         )
+
+
+def _short_list(names: list[str], limit: int = 3) -> str:
+    shown = ", ".join(names[:limit])
+    return f"{shown} (+{len(names) - limit} more)" if len(names) > limit else shown
 
 
 def _via(match: Match) -> str:

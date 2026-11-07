@@ -5,8 +5,9 @@ on Fedora Linux: folders left in `~/.config`, `~/.local/share`, `~/.cache` and
 `~/.var/app` by RPM, Flatpak and AppImage applications that are no longer
 installed.
 
-> **Status:** under development. The current stage (collector) is
-> **read-only**: nothing is moved or deleted.
+> **Status:** under development. Stage 1 (read-only collector) and stage 2
+> (safety checks and reversible quarantine, Python API only) are done; the
+> command-line interface comes in stage 4.
 
 ## Requirements
 
@@ -72,6 +73,47 @@ Almost all of it is `dnf5 history info --json` itself (measure with
   Browser Integration writes stubs for Flatpak browsers into `~/.var/app` at
   every login (it can be disabled in *System Settings > Background Services >
   Plasma Browser Integration Flatpak Integration*).
+
+## Quarantine (stage 2)
+
+Nothing is ever deleted directly. Items are moved with a single atomic
+`rename()` into `~/.local/share/fsu/quarantine/<id>/payload`, next to a
+`manifest.json` describing where they came from; every operation is logged in
+`~/.local/share/fsu/log.jsonl`. Restoring never overwrites an existing path,
+and a tampered manifest cannot restore anything outside the scan roots.
+
+Before any move (`fsu.safeguard`):
+
+- FSU refuses to run as root, through `sudo` or through `pkexec`;
+- the item is re-validated (still there, still in scope, no symlinked parent);
+- every file inside must belong to the user and be readable;
+- no mount point or Btrfs subvolume inside the item;
+- item and quarantine must share a file system (no copy-based moves);
+- no process of the user may have files open or its working directory inside
+  the item, and the owning application must not be running. Linux hides
+  other users' processes, so files held by system services cannot be seen.
+
+Score policy:
+
+| Score | Rule |
+|---|---|
+| >= 0.70 | Quarantine directly |
+| 0.40 - 0.70 | Requires a Snapper snapshot, or explicit confirmation if Snapper is unavailable |
+| < 0.40 | Only if explicitly selected, and always with a Snapper snapshot |
+
+### Snapper
+
+FSU never configures Snapper. It uses a config whose subvolume is the mount
+point of `$HOME` and that the user may access. To enable it (once, as admin):
+
+```bash
+sudo snapper -c home create-config /home
+sudo snapper -c home set-config ALLOW_USERS=$USER SYNC_ACL=yes
+# optional: no hourly timeline snapshots, only the ones FSU asks for
+sudo snapper -c home set-config TIMELINE_CREATE=no
+```
+
+One snapshot is created per batch, only when a batch item needs it.
 
 ## Development
 

@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Dependencies
-        run: dnf5 -y install python3 python3-pytest
+        run: dnf5 -y install python3 python3-pytest snapper
       - name: Create a real removal transaction in the DNF5 history
         run: |
           dnf5 -y install cowsay
