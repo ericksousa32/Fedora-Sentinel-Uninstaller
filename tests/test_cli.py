@@ -93,7 +93,7 @@ def test_scan_with_ai(cli: Cli) -> None:
     finally:
         fake.close()
     assert code == EXIT_OK
-    assert "AI: uncertain" in out
+    assert "AI: uncertain - " in out  # no confidence shown for "uncertain"
     assert "advice only" in out
 
 
@@ -290,3 +290,16 @@ def test_concurrent_operation_is_refused(cli: Cli, cli_home: Path) -> None:
     assert code == EXIT_ERROR
     assert "in progress" in err
     assert (cli_home / ".config/hexchat").exists()
+
+
+def test_scan_with_ai_shows_confidence_for_verdicts(cli: Cli) -> None:
+    fake = FakeOllama()
+    fake.answer = lambda body: (
+        200,
+        {"verdict": "in_use", "confidence": 0.9, "rationale": "Known layout."},
+    )
+    try:
+        _code, out, _err = cli("scan", "--ai", "--ollama-url", fake.url)
+    finally:
+        fake.close()
+    assert "AI: in_use (0.90) - Known layout." in out

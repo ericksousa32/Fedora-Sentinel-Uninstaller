@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TextIO
 
 from fsu import __version__
-from fsu.ai_engine import DEFAULT_URL, AiEngine, AiReview, OllamaClient
+from fsu.ai_engine import DEFAULT_URL, AiEngine, AiReview, OllamaClient, Verdict
 from fsu.collector import Collector
 from fsu.models import Action, Candidate, ScanReport
 from fsu.quarantine import BatchResult, QuarantineError, QuarantineStore, execute
@@ -87,10 +87,12 @@ def _print_candidates(
         opinion = review.opinions.get(c.path) if review else None
         if opinion is not None:
             flag = " [demoted]" if opinion.demoted else ""
-            ctx.out(
-                f"      AI: {opinion.verdict.value} ({opinion.confidence:.2f}){flag}"
-                f" - {opinion.rationale}"
+            # A confidence attached to "uncertain" carries no information and
+            # can be mistaken for the heuristic score: shown only for verdicts.
+            confidence = (
+                "" if opinion.verdict is Verdict.UNCERTAIN else f" ({opinion.confidence:.2f})"
             )
+            ctx.out(f"      AI: {opinion.verdict.value}{confidence}{flag} - {opinion.rationale}")
 
 
 def _confirm(ctx: Context, question: str, assume_yes: bool) -> bool:
