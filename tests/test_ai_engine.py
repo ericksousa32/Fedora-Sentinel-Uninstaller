@@ -273,7 +273,9 @@ def test_same_application_is_judged_once(ollama: FakeOllama, home: Path) -> None
 def test_prompt_mentions_recency_is_not_proof(ollama: FakeOllama, home: Path) -> None:
     make(home / ".cache/x/a")
     _review(ollama, home, [home / ".cache/x"], [0.20])
-    assert "does NOT prove" in ollama.generate_bodies()[0]["system"]
+    system = ollama.generate_bodies()[0]["system"]
+    assert "nor that it was removed" in system
+    assert "they prove\nneither" in system or "prove neither" in system.replace("\n", " ")
 
 
 def test_rationale_is_cut_at_a_word_boundary(ollama: FakeOllama, home: Path) -> None:
@@ -384,5 +386,60 @@ def test_facts_are_never_sent_to_the_model(home: Path) -> None:
             Evidence("facts", "no program, launcher or running process with exactly this name"),
         ),
     )
-    sent = describe(cand)["heuristic_evidence"]
-    assert sent == ["no known match"]
+    assert describe(cand)["evidence"] == []
+
+
+# -- neutrality guards ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "word",
+    [
+        # tools, runtimes, desktops and apps seen while testing on one system:
+        # naming them in the prompt biased the model ("explicitly listed").
+        "python", "pip", "uv", "umu", "steam", "proton", "wine", "game", "kde",
+        "gnome", "plasma", "amd", "gpu", "rocm", "miopen", "ai/", "electron",
+        "flatpak", "appimage", "nuvio", "dosbox", "hytale",
+    ],
+)  # fmt: skip
+def test_prompt_names_no_specific_software(word: str) -> None:
+    import re
+
+    from fsu.ai_engine import SYSTEM_PROMPT
+
+    assert not re.search(rf"\b{re.escape(word)}\b", SYSTEM_PROMPT, re.IGNORECASE), word
+
+
+def test_prompt_is_symmetric() -> None:
+    from fsu.ai_engine import SYSTEM_PROMPT
+
+    text = " ".join(SYSTEM_PROMPT.split())
+    assert "Do not claim that software is installed, nor that it was removed" in text
+    assert "few files" not in text  # no (inaccurate) cost asymmetry
+
+
+def test_model_input_has_no_score_size_or_negative_evidence(home: Path) -> None:
+    from dataclasses import replace as dc_replace
+
+    from fsu.models import Evidence
+
+    item = home / ".cache/x"
+    make(item / "a", 5000)
+    cand = dc_replace(
+        candidate(item, home, 0.20),
+        size_bytes=5000,
+        evidence=(
+            Evidence("heuristic", "no known match"),
+            Evidence("installed", "similar to installed X (0.89)"),
+            Evidence("dnf5-history", "similar to removed package y (0.5)"),
+            Evidence("facts", "no program, launcher or running process with exactly this name"),
+            Evidence("fsu", "owned by another user (uid 0)"),
+        ),
+    )
+    data = describe(cand)
+    assert "heuristic_score" not in data
+    assert "size_bytes" not in data
+    assert data["evidence"] == [
+        "similar to installed X (0.89)",
+        "similar to removed package y (0.5)",
+    ]

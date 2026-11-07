@@ -214,6 +214,13 @@ The AI is an **advisor, never an executor**:
   in use; it can never promote anything. Folder names are untrusted data that
   reach the prompt, so a manipulated answer can only make FSU more careful.
 
+**Neutral input.** The model receives names, locations, first-level entry names,
+dates and *positive* findings only. It does not receive the heuristic score,
+the size, or negative findings ("no known match", "no program with this name"):
+in real tests each of these biased the answers. The prompt names no specific
+software and treats "installed" and "removed" symmetrically; tests guard both.
+Prompt changes follow general rules, never a fix for one specific item.
+
 Privacy and robustness: only loopback addresses are accepted, system proxies
 are bypassed, Ollama "cloud" models (e.g. `gpt-oss:120b-cloud`, which the
 local service forwards to remote servers) are refused, only names and metadata are sent (never file contents), answers
