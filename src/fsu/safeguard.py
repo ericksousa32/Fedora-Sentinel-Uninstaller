@@ -31,8 +31,7 @@ from pathlib import Path
 
 from fsu.heuristics import normalize
 from fsu.models import Action, Candidate
-from fsu.paths import SCAN_ROOTS
-from fsu.protected import category_of, is_protected
+from fsu.protected import is_protected, matching_root
 from fsu.system import CommandError, CommandNotFoundError, Runner, run_command
 
 PROC_ROOT = Path("/proc")
@@ -110,19 +109,47 @@ def _summarize(paths: list[str]) -> str:
 # -- individual checks ------------------------------------------------------------
 
 
+def symlink_in_chain(root: Path, home: Path) -> bool:
+    """Whether ``root``, or any folder between ``home`` and it, is a symlink.
+
+    ``home`` itself may be reached through a symlink (/home -> /var/home on
+    Fedora Atomic); that is fine. For roots outside $HOME (custom XDG
+    variables) only the root itself is checked.
+    """
+    if root == home:
+        return False
+    if home not in root.parents:
+        return root.is_symlink()
+    current = home
+    for part in root.relative_to(home).parts:
+        current = current / part
+        if current.is_symlink():
+            return True
+    return False
+
+
 def revalidate(candidate: Candidate, home: Path) -> list[Block]:
     """The item still exists, is still in scope and its location has no symlink."""
     path = candidate.path
     if not os.path.lexists(path):
         return [Block("missing", f"{path} no longer exists")]
-    category = category_of(path, home)
-    if category is not candidate.category:
+    found = matching_root(path, home)
+    if found is None or found[0] is not candidate.category:
         return [Block("out-of-scope", f"{path} is not a first-level item of a scan root")]
     if is_protected(path, home):
         return [Block("protected", f"{path} is protected")]
-    # The parent must be exactly <real home>/<scan root>: no symlinked component
-    # between $HOME and the item (e.g. ~/.config pointing elsewhere).
-    expected_parent = home.resolve() / SCAN_ROOTS[category]
+    # No symlinked component between $HOME and the item (e.g. ~/.config
+    # pointing elsewhere), and the parent must resolve exactly to its root.
+    root = found[1]
+    if symlink_in_chain(root, home):
+        return [Block("symlinked-root", f"{root} (or a folder above it) is a symlink")]
+    try:
+        if root == home or home in root.parents:
+            expected_parent = home.resolve(strict=True) / root.relative_to(home)
+        else:
+            expected_parent = root.parent.resolve(strict=True) / root.name
+    except OSError as exc:
+        return [Block("unreachable", f"cannot resolve {root}: {exc}")]
     try:
         actual_parent = path.parent.resolve(strict=True)
     except OSError as exc:

@@ -79,6 +79,9 @@ def isolated_executables(
     """
     from fsu import inventory
 
+    # CI runners set XDG_CONFIG_HOME & co. to the real home: tests use their own.
+    for variable in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.delenv(variable, raising=False)
     empty = tmp_path_factory.mktemp("no-executables")
     monkeypatch.setattr(inventory, "default_executable_dirs", lambda home: [])
     monkeypatch.setattr(inventory, "OPT_ROOT", empty / "opt")

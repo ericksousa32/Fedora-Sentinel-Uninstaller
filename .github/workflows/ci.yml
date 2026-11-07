@@ -57,14 +57,18 @@ jobs:
             cd ~/repo
             export PYTHONPATH=src
             mkdir -p ~/.config/cowsay && echo data > ~/.config/cowsay/file
+            mkdir -p ~/.cowsay ~/.config/autostart
+            printf "[Desktop Entry]\nExec=/opt/gone/bin/gone\n" > ~/.config/autostart/gone.desktop
             python3 -m fsu scan
+            python3 -m fsu scan --json | python3 -c "import json,sys; c={x[\"category\"] for x in json.load(sys.stdin)[\"candidates\"]}; assert {\"config\",\"home\",\"launcher\"} <= c, c"
             python3 -m fsu quarantine
             test -d ~/.config/cowsay
             python3 -m fsu quarantine --apply --yes
-            test ! -e ~/.config/cowsay
+            test ! -e ~/.config/cowsay && test ! -e ~/.cowsay && test ! -e ~/.config/autostart/gone.desktop
             python3 -m fsu list-quarantine
             python3 -m fsu restore --all
             test "$(cat ~/.config/cowsay/file)" = data
+            test -d ~/.cowsay && test -f ~/.config/autostart/gone.desktop
           '
           # FSU must refuse to run as root
           if PYTHONPATH=src python3 -m fsu scan; then exit 1; fi

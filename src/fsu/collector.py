@@ -33,16 +33,21 @@ from fsu.inventory import (
     USER_FLATPAK_DESKTOP_DIR,
     AppImageInventory,
     AppImageState,
+    CommandStatus,
     DesktopIndex,
     DnfHistory,
     ExecutableInventory,
     FlatpakInventory,
     RpmInventory,
+    check_command,
     is_noise_package,
+    parse_desktop_file,
+    parse_unit_file,
 )
 from fsu.models import Candidate, Category, Evidence, ScanReport
-from fsu.paths import APPIMAGE_DIRS, SCAN_ROOTS, USER_APPLICATIONS_DIR
+from fsu.paths import APPIMAGE_DIRS, scan_roots, user_applications_dir
 from fsu.protected import is_protected
+from fsu.safeguard import symlink_in_chain
 from fsu.system import CommandError, CommandNotFoundError, Runner, run_command
 
 # Plasma Browser Integration (Plasma >= 6.3) writes native-messaging stubs for
@@ -151,6 +156,11 @@ def is_generated_stub(path: Path) -> bool:
     return True
 
 
+LAUNCHER_SUFFIXES = (".desktop", ".service", ".timer")
+# Areas where only high-confidence items (>= 0.70) are ever listed.
+STRICT_CATEGORIES = frozenset({Category.HOME, Category.STATE, Category.LAUNCHER})
+
+
 class HomeScanner:
     """Lists the first-level items of the scan roots."""
 
@@ -158,23 +168,42 @@ class HomeScanner:
         self.home = home
         self.warnings: list[str] = []
 
+    @staticmethod
+    def _wanted(category: Category, path: Path) -> bool:
+        """Pre-filter: in $HOME only real hidden folders; launchers are plain files."""
+        if category is Category.HOME:
+            return path.name.startswith(".") and path.is_dir() and not path.is_symlink()
+        if category is Category.LAUNCHER:
+            return (
+                path.name.endswith(LAUNCHER_SUFFIXES) and path.is_file() and not path.is_symlink()
+            )
+        return True
+
     def entries(self) -> Iterator[tuple[Category, Path]]:
-        for category, relative_root in SCAN_ROOTS.items():
-            root = self.home / relative_root
-            if root.is_symlink():
-                # Root pointing elsewhere (e.g. a dotfiles manager): out of the
-                # safe scope of this stage.
-                self.warnings.append(f"{root} is a symlink; root skipped for safety.")
-                continue
-            if not root.is_dir():
-                continue
-            try:
-                names = sorted(child.name for child in root.iterdir())
-            except OSError as exc:
-                self.warnings.append(f"cannot list {root}: {exc}")
-                continue
-            for name in names:
-                yield category, root / name
+        all_roots = scan_roots(self.home)
+        # Folders that contain other scan roots (~/.config, ~/.local, ...) are
+        # scanned through those roots, never as items themselves.
+        containers = {
+            parent for roots in all_roots.values() for root in roots for parent in root.parents
+        } | {root for roots in all_roots.values() for root in roots}
+        for category, roots in all_roots.items():
+            for root in roots:
+                if symlink_in_chain(root, self.home):
+                    # Root pointing elsewhere (e.g. a dotfiles manager): out of the
+                    # safe scope.
+                    self.warnings.append(f"{root} is a symlink; root skipped for safety.")
+                    continue
+                if not root.is_dir():
+                    continue
+                try:
+                    names = sorted(child.name for child in root.iterdir())
+                except OSError as exc:
+                    self.warnings.append(f"cannot list {root}: {exc}")
+                    continue
+                for name in names:
+                    path = root / name
+                    if path not in containers and self._wanted(category, path):
+                        yield category, path
 
 
 class Collector:
@@ -207,8 +236,8 @@ class Collector:
             return RpmInventory(self._runner).installed_names()
         except CommandError as exc:
             warnings.append(
-                f"RPM inventory unavailable ({exc}); ~/.config, ~/.local/share and "
-                "~/.cache will not be evaluated."
+                f"RPM inventory unavailable ({exc}); ~/.config, ~/.local/share, "
+                "~/.cache, ~/.local/state and $HOME will not be evaluated."
             )
             return None
 
@@ -235,7 +264,7 @@ class Collector:
 
     def _appimages(self, warnings: list[str]) -> AppImageState:
         state = AppImageInventory(
-            self.home, self.home / USER_APPLICATIONS_DIR, self._appimage_dirs
+            self.home, user_applications_dir(self.home), self._appimage_dirs
         ).scan()
         warnings.extend(state.warnings)
         return state
@@ -244,12 +273,16 @@ class Collector:
 
     @staticmethod
     def _score_rpm_or_appimage(
-        name: str, removed: NameIndex, missing_appimages: NameIndex, evidence: list[Evidence]
+        name: str,
+        removed: NameIndex,
+        missing_appimages: NameIndex,
+        evidence: list[Evidence],
+        use_variants: bool = True,
     ) -> tuple[float, str | None]:
         """Best score among removed RPMs and gone AppImages (0.20 if neither)."""
         options: list[tuple[float, str, Evidence]] = []
 
-        rpm = removed.match(name)
+        rpm = removed.match(name, use_variants)
         if rpm is not None:
             if rpm.kind is MatchKind.EXACT:
                 score = (
@@ -263,7 +296,7 @@ class Collector:
                 detail = f"similar to removed package {rpm.name} ({rpm.strength:.2f})" + _via(rpm)
             options.append((score, rpm.name, Evidence("dnf5-history", detail)))
 
-        app = missing_appimages.match(name)
+        app = missing_appimages.match(name, use_variants)
         if app is not None:
             if app.kind is MatchKind.EXACT:
                 score = heuristics.SCORE_EXACT_STALE_APPIMAGE
@@ -279,6 +312,34 @@ class Collector:
         options.sort(key=lambda o: (-o[0], o[1]))
         evidence.extend(o[2] for o in options)
         return options[0][0], options[0][1]
+
+    def _judge_launcher(
+        self, path: Path, search_dirs: tuple[Path, ...], flatpak_ids: frozenset[str] | None
+    ) -> tuple[str, float, str | None, list[Evidence]]:
+        """Verdict for a launcher/service file: ("installed"|"hidden"|"intentional"|"candidate")."""
+        try:
+            if path.suffix == ".desktop":
+                entry = parse_desktop_file(path)
+                if entry.hidden:
+                    return "intentional", 0.0, None, []
+                line, systemd = entry.exec_line, False
+            else:
+                line, systemd = parse_unit_file(path).exec_line, path.parent.name == "user"
+        except OSError:
+            return "hidden", 0.0, None, []
+        if not line:
+            return "hidden", 0.0, None, []
+        check = check_command(line, search_dirs, flatpak_ids, systemd=systemd)
+        if check.status is CommandStatus.FOUND:
+            return "installed", 0.0, None, []
+        if check.status is CommandStatus.UNKNOWN:
+            return "hidden", 0.0, None, []
+        score = (
+            heuristics.SCORE_LAUNCHER_TARGET_MISSING
+            if check.status is CommandStatus.MISSING
+            else heuristics.SCORE_LAUNCHER_PROGRAM_NOT_FOUND
+        )
+        return "candidate", score, check.program, [Evidence("launcher", check.detail)]
 
     def _candidate(
         self, path: Path, category: Category, score: float, evidence: list[Evidence],
@@ -338,7 +399,7 @@ class Collector:
         lap("desktop_files")
         appimages = self._appimages(warnings)
         lap("appimages")
-        dirs = (
+        dirs = tuple(
             self._executable_dirs
             if self._executable_dirs is not None
             else inventory.default_executable_dirs(self.home)
@@ -369,6 +430,9 @@ class Collector:
         protected: list[Path] = []
         regenerated: list[Path] = []
         installed_skipped = 0
+        hidden = 0
+        launcher_scores: dict[Path, tuple[float, str | None]] = {}
+        timers: list[Path] = []
 
         for category, path in scanner.entries():
             if is_protected(path, self.home):
@@ -377,6 +441,7 @@ class Collector:
 
             evidence: list[Evidence] = []
             matched: str | None = None
+            strict = category in STRICT_CATEGORIES
 
             if category is Category.FLATPAK:
                 if flatpak_ids is None:
@@ -390,20 +455,37 @@ class Collector:
                 score = heuristics.SCORE_FLATPAK_ORPHAN
                 matched = path.name
                 evidence.append(Evidence("flatpak", f"app {path.name} is not installed"))
+            elif category is Category.LAUNCHER:
+                if path.suffix == ".timer":
+                    timers.append(path)  # judged after the services
+                    continue
+                verdict, score, matched, evidence = self._judge_launcher(path, dirs, flatpak_ids)
+                if verdict == "installed":
+                    installed_skipped += 1
+                    continue
+                if verdict == "intentional":
+                    protected.append(path)
+                    continue
+                if verdict == "hidden":
+                    hidden += 1
+                    continue
+                launcher_scores[path] = (score, matched)
             else:
                 if rpm_installed is None:
                     continue
+                # In $HOME itself only exact names count: no variants, no similarity.
+                variants = category is not Category.HOME
                 if heuristics.owners_matching(path.name, installed_exact):
                     installed_skipped += 1
                     continue
                 removed_owners = heuristics.owners_matching(path.name, removed)
-                installed_match = installed_index.match(path.name)
+                installed_match = installed_index.match(path.name, variants)
                 if installed_match is not None and installed_match.kind is MatchKind.EXACT:
                     installed_skipped += 1
                     continue
                 # A program with the same name exists (e.g. /usr/local/bin/konsave):
                 # the application is installed. Its absence proves nothing.
-                program = executable_index.match(path.name)
+                program = executable_index.match(path.name, variants)
                 if program is not None and program.kind is MatchKind.EXACT:
                     installed_skipped += 1
                     continue
@@ -417,8 +499,10 @@ class Collector:
                     )
                 else:
                     score, matched = self._score_rpm_or_appimage(
-                        path.name, removed_index, missing_index, evidence
+                        path.name, removed_index, missing_index, evidence, variants
                     )
+                    if not variants and score < heuristics.SCORE_EXACT_STALE_APPIMAGE:
+                        score = heuristics.SCORE_NO_MATCH  # no partial matches in $HOME
                 if installed_match is not None:
                     score = min(score, heuristics.SCORE_CAP_PARTIAL_INSTALLED)
                     evidence.append(
@@ -429,9 +513,33 @@ class Collector:
                         )
                     )
 
+            if strict and score < heuristics.THRESHOLD_QUARANTINE:
+                hidden += 1
+                continue
             candidate = self._candidate(path, category, score, evidence, matched, warnings)
             if candidate is not None:
                 candidates.append(candidate)
+
+        # A timer of a removed service fires a unit that no longer works.
+        for timer in timers:
+            try:
+                unit = parse_unit_file(timer).unit or timer.with_suffix(".service").name
+            except OSError:
+                hidden += 1
+                continue
+            service = timer.parent / unit
+            if service in launcher_scores:
+                score, matched = launcher_scores[service]
+                evidence = [Evidence("launcher", f"timer of {unit}, whose program is gone")]
+                candidate = self._candidate(
+                    timer, Category.LAUNCHER, score, evidence, matched, warnings
+                )
+                if candidate is not None:
+                    candidates.append(candidate)
+            elif service.exists():
+                installed_skipped += 1
+            else:
+                hidden += 1
         lap("scan_and_score")
 
         if regenerated:
@@ -446,6 +554,7 @@ class Collector:
             regenerated_skipped=tuple(regenerated),
             stale_launchers=appimages.stale_launchers,
             timings=timings,
+            low_confidence_hidden=hidden,
         )
 
 

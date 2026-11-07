@@ -15,6 +15,9 @@ class Category(enum.Enum):
     DATA = "data"  # ~/.local/share
     CACHE = "cache"  # ~/.cache
     FLATPAK = "flatpak"  # ~/.var/app
+    STATE = "state"  # ~/.local/state
+    HOME = "home"  # hidden folders directly in $HOME (~/.nuget, ~/.dotnet, ...)
+    LAUNCHER = "launcher"  # autostart / user systemd / D-Bus / .desktop files
 
 
 class Action(enum.Enum):
@@ -91,6 +94,9 @@ class ScanReport:
     # User launchers (.desktop) whose AppImage no longer exists.
     stale_launchers: tuple[Path, ...] = ()
     timings: dict[str, float] = field(default_factory=dict)
+    # Items in the strict areas (home root, state, launchers) that did not reach
+    # 0.70: never listed, only counted.
+    low_confidence_hidden: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -101,4 +107,5 @@ class ScanReport:
             "regenerated_skipped": [str(p) for p in self.regenerated_skipped],
             "stale_launchers": [str(p) for p in self.stale_launchers],
             "timings": {k: round(v, 3) for k, v in self.timings.items()},
+            "low_confidence_hidden": self.low_confidence_hidden,
         }

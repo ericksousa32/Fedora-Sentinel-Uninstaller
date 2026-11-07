@@ -10,7 +10,7 @@ import fnmatch
 from pathlib import Path
 
 from fsu.models import Category
-from fsu.paths import SCAN_ROOTS
+from fsu.paths import scan_roots
 
 # fnmatch patterns (case-insensitive) applied to the name of the first-level
 # item inside each scanned root.
@@ -69,34 +69,60 @@ PROTECTED_PATTERNS: dict[Category, tuple[str, ...]] = {
         "JNA",
     ),
     Category.FLATPAK: (),
+    Category.STATE: (
+        "fsu", "wireplumber", "pipewire", "systemd", "plasma*", "kwin*", "gnome-*",
+    ),
+    # Hidden folders directly in $HOME. Besides identity and the XDG roots,
+    # folders that usually hold *user data* are protected even when their
+    # application was removed: removing an app does not make its data disposable.
+    Category.HOME: (
+        # XDG roots, FSU itself and the desktop session
+        ".config", ".local", ".cache", ".var", ".fsu", ".dbus", ".kde", ".kde4",
+        ".gnome", ".gnome2", ".themes", ".icons", ".fonts", ".pulse", ".Trash*",
+        # Identity, keys and credentials
+        ".ssh", ".gnupg", ".pki", ".password-store", ".android", ".docker", ".kube",
+        ".aws", ".azure", ".terraform.d", ".vnc", ".cert", ".ollama",
+        # User data: browsers/mail profiles, games, Windows prefixes, models, ...
+        ".mozilla", ".thunderbird", ".librewolf", ".waterfox", ".floorp",
+        ".minecraft", ".steam", ".steampath", ".steampid", ".local/share/Steam",
+        ".wine", ".wine*", ".PlayOnLinux", ".lutris", ".lmstudio", ".java",
+        ".electrum", ".bitcoin", ".ethereum", ".monero",
+    ),
+    Category.LAUNCHER: (
+        "mimeapps.list", "defaults.list", "mimeinfo.cache", "*.list",
+        "default.target.wants", "*.wants", "*.requires",
+    ),
 }
 # fmt: on
 
 
-def category_of(path: Path, home: Path) -> Category | None:
-    """Category of a first-level item, or ``None``.
-
-    Returns a category only when ``path`` is *exactly* a direct child of one
-    of the scan roots.
-    """
-    try:
-        relative = path.relative_to(home)
-    except ValueError:
+def matching_root(path: Path, home: Path) -> tuple[Category, Path] | None:
+    """Category and scan root of which ``path`` is *exactly* a direct child."""
+    if path.name in ("", ".", ".."):
         return None
-    for category, root in SCAN_ROOTS.items():
-        if relative.parent == root and relative.name not in ("", ".", ".."):
-            return category
+    for category, roots in scan_roots(home).items():
+        for root in roots:
+            if path.parent == root:
+                return category, root
     return None
+
+
+def category_of(path: Path, home: Path) -> Category | None:
+    """Category of a first-level item, or ``None``."""
+    found = matching_root(path, home)
+    return found[0] if found else None
 
 
 def is_protected(path: Path, home: Path) -> bool:
     """Whether FSU must ignore ``path``.
 
     Anything that is not a direct child of a scan root is protected
-    (fail-safe).
+    (fail-safe). In $HOME itself, only hidden folders can ever be candidates.
     """
     category = category_of(path, home)
     if category is None:
+        return True
+    if category is Category.HOME and not path.name.startswith("."):
         return True
     name = path.name.lower()
     patterns = PROTECTED_PATTERNS[category]

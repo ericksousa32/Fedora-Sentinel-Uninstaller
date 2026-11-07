@@ -35,7 +35,7 @@ from urllib.parse import urlsplit
 
 from fsu import heuristics
 from fsu.models import Action, Candidate, Evidence
-from fsu.paths import SCAN_ROOTS
+from fsu.paths import ROOT_LABELS
 
 DEFAULT_URL = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT = 120.0
@@ -304,7 +304,7 @@ def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
         pass
     return {
         "name": _clean(path.name),
-        "location": "~/" + str(SCAN_ROOTS[candidate.category]),
+        "location": ROOT_LABELS[candidate.category],
         "category": candidate.category.value,
         "is_symlink": candidate.is_symlink,
         "size_bytes": candidate.size_bytes,

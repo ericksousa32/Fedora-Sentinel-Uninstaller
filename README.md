@@ -1,9 +1,9 @@
 # Fedora Sentinel Uninstaller (FSU)
 
 An intelligent, safe and surgical tool for cleaning up residual data in `$HOME`
-on Fedora Linux: folders left in `~/.config`, `~/.local/share`, `~/.cache` and
-`~/.var/app` by RPM, Flatpak and AppImage applications that are no longer
-installed.
+on Fedora Linux: what RPM, Flatpak and AppImage applications that are no longer
+installed leave in `~/.config`, `~/.local/share`, `~/.cache`, `~/.local/state`,
+`~/.var/app`, hidden folders of `$HOME` and launcher/service folders.
 
 > **Status:** under development (`dev` branch). Collector, safety checks,
 > reversible quarantine, local AI advisor and command-line interface are in
@@ -56,9 +56,38 @@ Nothing is ever deleted automatically. Exit codes: `0` success, `1` error,
 | Exact match through a name variant (`<app>rc`, `<app>-...`) | 0.80 |
 | Folder owned by a removed package (e.g. `NuGet` -> `dotnet*`) | 0.80 |
 | Launcher pointing to an AppImage that no longer exists | 0.75 |
+| Launcher/service whose program (path or Flatpak) is gone | 0.85 |
+| Launcher/service whose bare program name is not found | 0.75 |
 | Similar to a removed package | 0.50 - 0.65 |
 | No known match | 0.20 |
 | Similar to something installed | capped at 0.30 |
+
+## Where FSU looks
+
+| Area | What is evaluated | Listed |
+|---|---|---|
+| `~/.config`, `~/.local/share`, `~/.cache` | first-level items | every band |
+| `~/.var/app` | Flatpak data folders | every band |
+| `~/.local/state` | first-level items | only >= 0.70 |
+| `$HOME` | **hidden folders only** (never files); exact names only, no variants or similarity | only >= 0.70 |
+| `~/.config/autostart`, `~/.config/systemd/user`, `~/.local/share/applications`, `~/.local/share/dbus-1/services` | `.desktop`, `.service`, `.timer` files whose program is gone | only >= 0.70 |
+
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and `XDG_STATE_HOME` are
+honoured when set to absolute paths (FSU's own folder follows `XDG_DATA_HOME`).
+
+In the strict areas, items below 0.70 are never shown, only counted. In
+`$HOME`, folders that usually hold **user data** are always protected, even if
+their application was removed (browser/mail profiles, games, Wine prefixes,
+local AI models, keys and credentials: `.mozilla`, `.thunderbird`, `.minecraft`,
+`.steam`, `.wine*`, `.lmstudio`, `.ollama`, `.ssh`, `.gnupg`, `.pki`,
+`.android`, `.docker`, `.kube`, ...).
+
+Launchers and services: a program given by absolute path that no longer exists,
+or a `flatpak run` of an app that is not installed, scores 0.85; a bare program
+name not found in the search path scores 0.75. Entries with `Hidden=true`
+(intentional overrides of system autostart entries), commands run through a
+shell or interpreter, variables and removable media are never judged. A timer
+is listed together with its service.
 
 ## Sources of truth
 

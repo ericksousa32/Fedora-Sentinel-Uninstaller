@@ -33,8 +33,8 @@ from typing import Any
 
 from fsu import __version__
 from fsu.models import Candidate
-from fsu.paths import FSU_DATA_DIR, QUARANTINE_DIR, SCAN_ROOTS
-from fsu.protected import category_of
+from fsu.paths import fsu_data_dir, quarantine_dir
+from fsu.protected import matching_root
 from fsu.safeguard import (
     MOUNTINFO,
     PROC_ROOT,
@@ -46,6 +46,7 @@ from fsu.safeguard import (
     ensure_not_root,
     preflight,
     revalidate,
+    symlink_in_chain,
 )
 from fsu.system import CommandError
 
@@ -114,14 +115,14 @@ class QuarantineStore:
 
     def __init__(self, home: Path, clock: Callable[[], float] = time.time) -> None:
         self.home = home
-        self.root = home / QUARANTINE_DIR
-        self.log_path = home / FSU_DATA_DIR / "log.jsonl"
+        self.root = quarantine_dir(home)
+        self.log_path = fsu_data_dir(home) / "log.jsonl"
         self._clock = clock
 
     # -- helpers -----------------------------------------------------------------
 
     def _ensure_dirs(self) -> None:
-        for directory in (self.home / FSU_DATA_DIR, self.root):
+        for directory in (fsu_data_dir(self.home), self.root):
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
             if directory.is_symlink() or not directory.is_dir():
                 raise QuarantineError(f"{directory} is not a real directory")
@@ -159,15 +160,21 @@ class QuarantineStore:
         original = Path(manifest.original_path)
         if not original.is_absolute() or ".." in original.parts:
             raise QuarantineError(f"unsafe original path in manifest: {original}")
-        category = category_of(original, self.home)
-        if category is None or category.value != manifest.category:
+        found = matching_root(original, self.home)
+        if found is None or found[0].value != manifest.category:
             raise QuarantineError(f"original path is outside the scan roots: {original}")
-        expected_parent = self.home.resolve() / SCAN_ROOTS[category]
+        if symlink_in_chain(found[1], self.home):
+            raise QuarantineError(f"{found[1]} (or a folder above it) is a symlink")
         try:
-            if original.parent.resolve(strict=True) != expected_parent:
-                raise QuarantineError(f"{original.parent} does not resolve inside $HOME")
+            expected = original.parent.resolve(strict=True)
+            if found[1] == self.home or self.home in found[1].parents:
+                wanted = self.home.resolve(strict=True) / found[1].relative_to(self.home)
+            else:
+                wanted = found[1].parent.resolve(strict=True) / found[1].name
         except OSError as exc:
             raise QuarantineError(f"cannot resolve {original.parent}: {exc}") from exc
+        if expected != wanted:
+            raise QuarantineError(f"{original.parent} does not resolve to its scan root")
         return original
 
     # -- operations --------------------------------------------------------------

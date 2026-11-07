@@ -156,8 +156,11 @@ def cmd_scan(ctx: Context, args: argparse.Namespace) -> int:
         f"{report.installed_skipped} match something installed; "
         f"{len(report.regenerated_skipped)} recreated by other software."
     )
-    for launcher in report.stale_launchers:
-        ctx.out(f"stale launcher (AppImage is gone): {launcher}")
+    if report.low_confidence_hidden:
+        ctx.out(
+            f"{report.low_confidence_hidden} low-confidence item(s) in $HOME, ~/.local/state "
+            "and launcher folders are not listed (only >= 0.70 is shown there)."
+        )
     if review is not None and review.available:
         ctx.out(f"AI advice: {review.model}, {review.seconds:.1f}s (advice only, never promotes)")
     ctx.out("Nothing was changed. Use 'fsu quarantine' to plan a clean-up.")

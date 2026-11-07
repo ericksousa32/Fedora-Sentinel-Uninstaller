@@ -31,6 +31,8 @@ SCORE_EXACT_REMOVED = 0.85
 SCORE_VARIANT_REMOVED = 0.80  # exact match through a name variant (e.g. "<app>rc")
 SCORE_OWNER_REMOVED = 0.80  # folder owned (per DIRECTORY_OWNERS) by a removed package
 SCORE_EXACT_STALE_APPIMAGE = 0.75  # launcher points to an AppImage that is gone
+SCORE_LAUNCHER_TARGET_MISSING = 0.85  # launcher/service runs a path or Flatpak that is gone
+SCORE_LAUNCHER_PROGRAM_NOT_FOUND = 0.75  # bare program name not found in the search path
 SCORE_PARTIAL_REMOVED_MIN = 0.50
 SCORE_PARTIAL_REMOVED_MAX = 0.65
 SCORE_NO_MATCH = 0.20
@@ -78,7 +80,10 @@ DIRECTORY_OWNERS: dict[str, tuple[str, ...]] = {
     # Gaming
     "steam": ("steam", "com.valvesoftware.Steam"),
     # Development tools
-    "nuget": ("dotnet*", "mono-core", "mono-devel"),  # .NET package cache
+    "nuget": ("dotnet*", "mono-core", "mono-devel"),  # .NET package cache (~/.nuget too)
+    "dotnet": ("dotnet*",),  # ~/.dotnet
+    "vscode": ("code", "code-insiders", "com.visualstudio.code", "codium", "com.vscodium.codium"),
+    "vscodeshared": ("code", "code-insiders", "com.visualstudio.code"),
     "wget": ("wget", "wget1*", "wget2*"),  # HSTS database
     # KDE components whose config file is not named after the package
     "katevirc": ("kate", "kwrite", "kf6-ktexteditor", "kf5-ktexteditor"),

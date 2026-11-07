@@ -182,13 +182,14 @@ def test_report_counters(populated_home: Path, fake_runner: FakeRunner, desktop_
     report = _report(populated_home, fake_runner, desktop_dir)
     protected = {str(p.relative_to(populated_home)) for p in report.protected_skipped}
     assert protected == {
+        ".ssh",
         ".config/dconf",
         ".config/KDE",
         ".local/share/fsu",
-        ".local/share/applications",
     }
     # GIMP, kdenlive, dolphinrc, mozilla, Code, LM Studio, wget, katevirc, Spotify
-    assert report.installed_skipped == 9
+    # and the lmstudio.desktop launcher (its AppImage exists)
+    assert report.installed_skipped == 10
     assert {p.name for p in report.regenerated_skipped} == {
         "com.google.Chrome",
         "io.gitlab.librewolf-community",
@@ -279,7 +280,8 @@ def test_without_rpm_only_flatpak_is_evaluated(populated_home: Path, desktop_dir
     responses = default_responses()
     responses[("rpm", "-qa")] = CommandError(["rpm"], "rpmdb corrupted")
     report = _report(populated_home, FakeRunner(responses), desktop_dir)
-    assert {c.category for c in report.candidates} == {Category.FLATPAK}
+    # Launchers do not depend on the RPM inventory: their program is checked on disk.
+    assert {c.category for c in report.candidates} == {Category.FLATPAK, Category.LAUNCHER}
     assert any("RPM inventory unavailable" in w for w in report.warnings)
 
 
@@ -290,7 +292,7 @@ def test_without_history_only_appimage_evidence_scores_high(
     responses[("dnf5", "history", "list")] = CommandError(["dnf5"], "failed")
     report = _report(populated_home, FakeRunner(responses), desktop_dir)
     above = {c.path.name for c in report.candidates if c.action is not Action.LIST_ONLY}
-    assert above == {"org.gimp.GIMP", "photocraft"}
+    assert above == {"org.gimp.GIMP", "photocraft", "ai.storyteller.photocraft.desktop"}
 
 
 def test_owner_rule_without_installed_or_removed_owner(home: Path, desktop_dir: Path) -> None:

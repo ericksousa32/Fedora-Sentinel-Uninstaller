@@ -17,10 +17,12 @@ All classes are read-only.
 
 from __future__ import annotations
 
+import enum
 import json
 import os
 import re
 import shlex
+import shutil
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -199,6 +201,8 @@ class DesktopEntry:
     name: str = ""
     startup_wm_class: str = ""
     icon: str = ""
+    exec_line: str = ""  # raw Exec= value
+    hidden: bool = False  # Hidden=true: an intentional override (e.g. disabled autostart)
     exec_target: str = ""  # first real program of Exec (wrappers skipped)
     is_flatpak_launcher: bool = False
     is_appimage: bool = False
@@ -241,7 +245,10 @@ def parse_desktop_file(path: Path) -> DesktopEntry:
         elif key == "Icon":
             entry.icon = value
         elif key == "Exec":
+            entry.exec_line = value
             entry.exec_target, entry.is_flatpak_launcher = _exec_target(value)
+        elif key == "Hidden":
+            entry.hidden = value.strip().lower() == "true"
         elif key.startswith("X-AppImage-"):
             entry.is_appimage = True
     if entry.exec_target.lower().endswith(".appimage"):
@@ -502,3 +509,106 @@ class ExecutableInventory:
                 except OSError as exc:
                     warnings.append(f"cannot list {venvs}: {exc}")
         return ExecutableState(names=names, warnings=tuple(warnings))
+
+
+# -- commands of launchers and services ----------------------------------------------
+
+
+class CommandStatus(enum.Enum):
+    FOUND = "found"
+    MISSING = "missing"  # absolute path or Flatpak app that does not exist
+    MISSING_BARE = "missing_bare"  # bare program name not found in the search path
+    UNKNOWN = "unknown"  # cannot be judged safely (shell, variables, removable media...)
+
+
+@dataclass(frozen=True)
+class CommandCheck:
+    status: CommandStatus
+    program: str
+    detail: str
+
+
+# Interpreters and shells: the real target is a script argument, too varied to
+# judge safely.
+_INTERPRETERS = frozenset(
+    {"sh", "bash", "dash", "zsh", "fish", "python", "python3", "perl", "ruby", "node", "java"}
+)
+_SYSTEMD_PREFIXES = "-@:+!"
+STANDARD_BIN_DIRS: tuple[Path, ...] = (
+    Path("/usr/local/bin"), Path("/usr/bin"), Path("/bin"), Path("/usr/local/sbin"),
+    Path("/usr/sbin"), Path("/usr/libexec"), Path("/var/lib/flatpak/exports/bin"),
+)  # fmt: skip
+
+
+def check_command(
+    line: str,
+    search_dirs: Iterable[Path],
+    flatpak_ids: frozenset[str] | None,
+    systemd: bool = False,
+) -> CommandCheck:
+    """Does the program a launcher/service would run still exist?"""
+    try:
+        tokens = shlex.split(line)
+    except ValueError:
+        return CommandCheck(CommandStatus.UNKNOWN, "", "unparsable command")
+    # Skip "env", its options and VAR=value assignments.
+    while tokens and (
+        tokens[0] == "env"
+        or (tokens[0].startswith("-") and not systemd)
+        or ("=" in tokens[0] and not tokens[0].startswith("/"))
+    ):
+        tokens = tokens[1:]
+    if not tokens:
+        return CommandCheck(CommandStatus.UNKNOWN, "", "no program")
+    program = tokens[0].lstrip(_SYSTEMD_PREFIXES) if systemd else tokens[0]
+    if not program or any(c in program for c in "$`%"):
+        return CommandCheck(CommandStatus.UNKNOWN, program, "program uses variables")
+    name = Path(program).name
+    if name in _INTERPRETERS:
+        return CommandCheck(CommandStatus.UNKNOWN, program, "runs through an interpreter")
+    if name == "flatpak":
+        if "run" not in tokens:
+            return CommandCheck(CommandStatus.UNKNOWN, program, "flatpak without 'run'")
+        rest = tokens[tokens.index("run") + 1 :]
+        app_id = next((t for t in rest if not t.startswith("-")), "")
+        if not app_id or flatpak_ids is None:
+            return CommandCheck(CommandStatus.UNKNOWN, app_id, "Flatpak state unknown")
+        if app_id in flatpak_ids:
+            return CommandCheck(CommandStatus.FOUND, app_id, f"Flatpak {app_id} is installed")
+        return CommandCheck(CommandStatus.MISSING, app_id, f"Flatpak {app_id} is not installed")
+    if program.startswith("/"):
+        target = Path(program)
+        if target.exists():
+            return CommandCheck(CommandStatus.FOUND, program, f"{program} exists")
+        if any(target.is_relative_to(p) for p in _REMOVABLE_PREFIXES):
+            return CommandCheck(CommandStatus.UNKNOWN, program, "on removable media")
+        return CommandCheck(CommandStatus.MISSING, program, f"{program} does not exist")
+    if "/" in program:
+        return CommandCheck(CommandStatus.UNKNOWN, program, "relative path")
+    dirs = [*search_dirs, *STANDARD_BIN_DIRS]
+    found = shutil.which(program, path=os.pathsep.join(str(d) for d in dirs))
+    if found:
+        return CommandCheck(CommandStatus.FOUND, program, f"{program} found at {found}")
+    return CommandCheck(CommandStatus.MISSING_BARE, program, f"program {program!r} not found")
+
+
+@dataclass(frozen=True)
+class UnitFile:
+    """The parts of a systemd user unit or D-Bus service file FSU reads."""
+
+    exec_line: str = ""  # ExecStart= (systemd) or Exec= (D-Bus)
+    unit: str = ""  # Unit= of a timer
+
+
+def parse_unit_file(path: Path) -> UnitFile:
+    exec_line = unit = ""
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";", "[")) or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if key in ("ExecStart", "Exec") and value and not exec_line:
+            exec_line = value
+        elif key == "Unit" and not unit:
+            unit = value
+    return UnitFile(exec_line, unit)
