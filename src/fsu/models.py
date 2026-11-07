@@ -1,4 +1,4 @@
-"""Modelos de dados imutáveis compartilhados pelos módulos do FSU."""
+"""Immutable data models shared by the FSU modules."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 
 class Category(enum.Enum):
-    """Origem do item residual dentro do $HOME."""
+    """Where a residual item lives inside $HOME."""
 
     CONFIG = "config"  # ~/.config
     DATA = "data"  # ~/.local/share
@@ -18,37 +18,37 @@ class Category(enum.Enum):
 
 
 class Action(enum.Enum):
-    """O que o FSU tem permissão de fazer com um candidato, segundo o score.
+    """What FSU is allowed to do with a candidate, based on its score.
 
-    As faixas são aplicadas por :func:`fsu.heuristics.action_for`.
+    The bands are applied by :func:`fsu.heuristics.action_for`.
     """
 
-    QUARANTINE = "quarantine"  # score >= 0.70: quarentena direta
+    QUARANTINE = "quarantine"  # score >= 0.70: direct quarantine
     QUARANTINE_WITH_SNAPSHOT = "quarantine_with_snapshot"  # 0.40 <= score < 0.70
-    LIST_ONLY = "list_only"  # score < 0.40: nunca movido automaticamente
+    LIST_ONLY = "list_only"  # score < 0.40: never moved automatically
 
 
 @dataclass(frozen=True)
 class Evidence:
-    """Uma justificativa legível para o score de um candidato."""
+    """A human-readable justification for a candidate's score."""
 
-    source: str  # ex.: "flatpak", "dnf5-history", "rpm", "desktop"
+    source: str  # e.g. "flatpak", "dnf5-history", "appimage", "installed", "fsu"
     detail: str
 
 
 @dataclass(frozen=True)
 class RemovedPackage:
-    """Pacote RPM removido segundo o histórico do DNF5."""
+    """RPM package removed according to the DNF5 history."""
 
     name: str
     transaction_id: int
-    removed_at: int  # UNIX time do fim da transação
-    reason: str = ""  # motivo de instalação registrado (User, Dependency…)
+    removed_at: int  # UNIX time of the end of the transaction
+    reason: str = ""  # install reason recorded by DNF5 (User, Dependency, ...)
 
 
 @dataclass(frozen=True)
 class Candidate:
-    """Item do $HOME que pode ser resíduo de um aplicativo removido."""
+    """An item in $HOME that may be left over by an uninstalled application."""
 
     path: Path
     category: Category
@@ -76,12 +76,18 @@ class Candidate:
 
 @dataclass(frozen=True)
 class ScanReport:
-    """Resultado de uma varredura somente leitura."""
+    """Result of a read-only scan."""
 
     candidates: tuple[Candidate, ...]
     warnings: tuple[str, ...] = ()
-    protected_skipped: tuple[Path, ...] = field(default=())
+    protected_skipped: tuple[Path, ...] = ()
     installed_skipped: int = 0
+    # Items that another component recreates (e.g. Plasma Browser Integration
+    # stubs in ~/.var/app); quarantining them would be pointless.
+    regenerated_skipped: tuple[Path, ...] = ()
+    # User launchers (.desktop) whose AppImage no longer exists.
+    stale_launchers: tuple[Path, ...] = ()
+    timings: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,4 +95,7 @@ class ScanReport:
             "warnings": list(self.warnings),
             "protected_skipped": [str(p) for p in self.protected_skipped],
             "installed_skipped": self.installed_skipped,
+            "regenerated_skipped": [str(p) for p in self.regenerated_skipped],
+            "stale_launchers": [str(p) for p in self.stale_launchers],
+            "timings": {k: round(v, 3) for k, v in self.timings.items()},
         }

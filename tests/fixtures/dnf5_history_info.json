@@ -12,8 +12,18 @@
     "rpmdb_version_begin": "a",
     "rpmdb_version_end": "b",
     "packages": [
-      {"nevra": "firefox-145.0-1.fc45.x86_64", "action": "Upgrade", "reason": "User", "repository": "updates"},
-      {"nevra": "firefox-144.0-1.fc45.x86_64", "action": "Replaced", "reason": "User", "repository": "@System"}
+      {
+        "nevra": "firefox-145.0-1.fc45.x86_64",
+        "action": "Upgrade",
+        "reason": "User",
+        "repository": "updates"
+      },
+      {
+        "nevra": "firefox-144.0-1.fc45.x86_64",
+        "action": "Replaced",
+        "reason": "User",
+        "repository": "@System"
+      }
     ]
   },
   {
@@ -29,9 +39,24 @@
     "rpmdb_version_begin": "c",
     "rpmdb_version_end": "d",
     "packages": [
-      {"nevra": "kwebkitpart-1.4.0-0.30.20190110.fc45.x86_64", "action": "Remove", "reason": "User", "repository": "@System"},
-      {"nevra": "kf5-kparts-5.116.0-3.fc45.x86_64", "action": "Remove", "reason": "Dependency", "repository": "@System"},
-      {"nevra": "qt5-qtwebkit-5.212.0-0.92.alpha4.fc45.x86_64", "action": "Remove", "reason": "Dependency", "repository": "@System"}
+      {
+        "nevra": "kwebkitpart-1.4.0-0.30.20190110.fc45.x86_64",
+        "action": "Remove",
+        "reason": "User",
+        "repository": "@System"
+      },
+      {
+        "nevra": "kf5-kparts-5.116.0-3.fc45.x86_64",
+        "action": "Remove",
+        "reason": "Dependency",
+        "repository": "@System"
+      },
+      {
+        "nevra": "qt5-qtwebkit-5.212.0-0.92.alpha4.fc45.x86_64",
+        "action": "Remove",
+        "reason": "Dependency",
+        "repository": "@System"
+      }
     ]
   },
   {
@@ -47,8 +72,18 @@
     "rpmdb_version_begin": "e",
     "rpmdb_version_end": "f",
     "packages": [
-      {"nevra": "aspnetcore-runtime-8.0-8.0.21-1.fc45.x86_64", "action": "Remove", "reason": "User", "repository": "@System"},
-      {"nevra": "dotnet-runtime-8.0-8.0.21-1.fc45.x86_64", "action": "Remove", "reason": "Dependency", "repository": "@System"}
+      {
+        "nevra": "aspnetcore-runtime-8.0-8.0.21-1.fc45.x86_64",
+        "action": "Remove",
+        "reason": "User",
+        "repository": "@System"
+      },
+      {
+        "nevra": "dotnet-runtime-8.0-8.0.21-1.fc45.x86_64",
+        "action": "Remove",
+        "reason": "Dependency",
+        "repository": "@System"
+      }
     ]
   },
   {
@@ -64,8 +99,30 @@
     "rpmdb_version_begin": "g",
     "rpmdb_version_end": "h",
     "packages": [
-      {"nevra": "hexchat-2.16.2-9.fc45.x86_64", "action": "Remove", "reason": "Clean", "repository": "@System"},
-      {"nevra": "gimp-2:3.0.4-1.fc45.x86_64", "action": "Remove", "reason": "Clean", "repository": "@System"}
+      {
+        "nevra": "hexchat-2.16.2-9.fc45.x86_64",
+        "action": "Remove",
+        "reason": "Clean",
+        "repository": "@System"
+      },
+      {
+        "nevra": "gimp-2:3.0.4-1.fc45.x86_64",
+        "action": "Remove",
+        "reason": "Clean",
+        "repository": "@System"
+      },
+      {
+        "nevra": "kolourpaint-25.08.2-1.fc45.x86_64",
+        "action": "Remove",
+        "reason": "User",
+        "repository": "@System"
+      },
+      {
+        "nevra": "kunifiedpush-1.0.0-2.fc45.x86_64",
+        "action": "Remove",
+        "reason": "Dependency",
+        "repository": "@System"
+      }
     ]
   },
   {
@@ -81,7 +138,12 @@
     "rpmdb_version_begin": "i",
     "rpmdb_version_end": "j",
     "packages": [
-      {"nevra": "linuxtoys-7.9.3-1.x86_64", "action": "Install", "reason": "User", "repository": "@commandline"}
+      {
+        "nevra": "linuxtoys-7.9.3-1.x86_64",
+        "action": "Install",
+        "reason": "User",
+        "repository": "@commandline"
+      }
     ]
   },
   {
@@ -97,7 +159,12 @@
     "rpmdb_version_begin": "k",
     "rpmdb_version_end": "l",
     "packages": [
-      {"nevra": "hexchat-2.16.2-8.fc44.x86_64", "action": "Remove", "reason": "User", "repository": "@System"}
+      {
+        "nevra": "hexchat-2.16.2-8.fc44.x86_64",
+        "action": "Remove",
+        "reason": "User",
+        "repository": "@System"
+      }
     ]
   }
 ]

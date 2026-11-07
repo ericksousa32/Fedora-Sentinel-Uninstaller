@@ -26,11 +26,11 @@ def test_category_of_first_level(relative: str, category: Category) -> None:
 @pytest.mark.parametrize(
     "path",
     [
-        HOME / ".config",  # a própria raiz
-        HOME / ".config/hexchat/servlist.conf",  # segundo nível
-        HOME / ".ssh",  # fora das raízes
-        HOME / "Documentos",
-        Path("/etc/hexchat"),  # fora da home
+        HOME / ".config",  # the root itself
+        HOME / ".config/hexchat/servlist.conf",  # second level
+        HOME / ".ssh",  # outside the roots
+        HOME / "Documents",
+        Path("/etc/hexchat"),  # outside home
     ],
 )
 def test_anything_outside_first_level_is_protected(path: Path) -> None:
@@ -40,7 +40,7 @@ def test_anything_outside_first_level_is_protected(path: Path) -> None:
 @pytest.mark.parametrize(
     "relative",
     [
-        ".local/share/fsu",  # quarentena do próprio FSU
+        ".local/share/fsu",  # FSU's own quarantine
         ".config/fsu",
         ".cache/fsu",
         ".config/dconf",
@@ -51,7 +51,19 @@ def test_anything_outside_first_level_is_protected(path: Path) -> None:
         ".local/share/flatpak",
         ".local/share/containers",
         ".local/share/Trash",
-        ".config/GTK-3.0",  # sem diferenciar maiúsculas
+        ".local/share/man",
+        ".config/GTK-3.0",  # case-insensitive
+        # KDE/Qt session items reported in the first real scan
+        ".config/krunnerrc",
+        ".config/QtProject.conf",
+        ".config/Trolltech.conf",
+        ".config/kde.org",
+        ".config/org.kde.kded.smart",
+        ".cache/kcrash-metadata",
+        ".cache/qtshadercache-x86_64-little_endian-lp64",
+        ".cache/event-sound-cache.tdb.962730d5f2bf4d4b959ec9825b133d8f.x86_64-redhat-linux-gnu",
+        ".local/share/knewstuff3",
+        ".local/share/kpeoplevcard",
     ],
 )
 def test_protected_names(relative: str) -> None:
@@ -59,7 +71,14 @@ def test_protected_names(relative: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "relative", [".config/hexchat", ".local/share/kwebkitpart", ".var/app/com.spotify.Client"]
+    "relative",
+    [
+        ".config/hexchat",
+        ".local/share/kwebkitpart",
+        ".var/app/com.spotify.Client",
+        ".cache/mozilla",  # owned by Firefox: judged, not blindly protected
+        ".config/kolourpaintrc",
+    ],
 )
 def test_regular_items_are_not_protected(relative: str) -> None:
     assert not is_protected(HOME / relative, HOME)

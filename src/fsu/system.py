@@ -1,9 +1,9 @@
-"""Execução controlada de comandos externos.
+"""Controlled execution of external commands.
 
-Todo subprocesso do FSU passa por :func:`run_command`: sem shell, com
-timeout, com locale fixo (a saída do Fedora do usuário pode estar em
-português) e com erros tipados. Os módulos recebem um ``Runner`` por
-injeção, o que permite testá-los sem um Fedora real.
+Every FSU subprocess goes through :func:`run_command`: no shell, a timeout,
+a fixed locale (the user's Fedora may be localized) and typed errors.
+Modules receive a ``Runner`` by injection, so they can be tested without a
+real Fedora system.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ DEFAULT_TIMEOUT = 60.0
 
 
 class CommandError(RuntimeError):
-    """O comando falhou (código de saída diferente de zero ou timeout)."""
+    """The command failed (non-zero exit status or timeout)."""
 
     def __init__(self, args: Sequence[str], message: str) -> None:
         self.command = tuple(args)
@@ -26,26 +26,27 @@ class CommandError(RuntimeError):
 
 
 class CommandNotFoundError(CommandError):
-    """O executável não existe no sistema."""
+    """The executable does not exist on this system."""
 
 
 def _environment() -> dict[str, str]:
     env = dict(os.environ)
-    # Saída previsível: mensagens e cabeçalhos em inglês, UTF-8.
+    # Predictable output: English messages and headers, UTF-8.
     env["LC_ALL"] = "C.UTF-8"
     env["LANG"] = "C.UTF-8"
     return env
 
 
 def run_command(args: Sequence[str], timeout: float = DEFAULT_TIMEOUT) -> str:
-    """Executa ``args`` (sem shell) e devolve o stdout.
+    """Run ``args`` (without a shell) and return its stdout.
 
-    Levanta :class:`CommandNotFoundError` se o executável não existir e
-    :class:`CommandError` para falhas ou timeout.
+    Raises :class:`CommandNotFoundError` if the executable does not exist and
+    :class:`CommandError` on failure or timeout.
     """
     if not args:
-        raise ValueError("comando vazio")
+        raise ValueError("empty command")
     try:
+        # Argument list, never a shell (S603 is allowed project-wide for this call).
         completed = subprocess.run(
             list(args),
             capture_output=True,
@@ -56,14 +57,14 @@ def run_command(args: Sequence[str], timeout: float = DEFAULT_TIMEOUT) -> str:
             stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError as exc:
-        raise CommandNotFoundError(args, "executável não encontrado") from exc
+        raise CommandNotFoundError(args, "executable not found") from exc
     except subprocess.TimeoutExpired as exc:
-        raise CommandError(args, f"tempo esgotado após {timeout:.0f}s") from exc
+        raise CommandError(args, f"timed out after {timeout:.0f}s") from exc
     except OSError as exc:
         raise CommandError(args, str(exc)) from exc
 
     if completed.returncode != 0:
         stderr = completed.stderr.strip().splitlines()
-        detail = stderr[-1] if stderr else "sem mensagem de erro"
-        raise CommandError(args, f"código de saída {completed.returncode}: {detail}")
+        detail = stderr[-1] if stderr else "no error message"
+        raise CommandError(args, f"exit status {completed.returncode}: {detail}")
     return completed.stdout

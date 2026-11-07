@@ -1,47 +1,72 @@
 # Fedora Sentinel Uninstaller (FSU)
 
-Ferramenta inteligente, segura e cirúrgica para o saneamento de dados residuais
-no `$HOME` do Fedora Linux: pastas deixadas em `~/.config`, `~/.local/share`,
-`~/.cache` e `~/.var/app` por aplicativos RPM e Flatpak já desinstalados.
+An intelligent, safe and surgical tool for cleaning up residual data in `$HOME`
+on Fedora Linux: folders left in `~/.config`, `~/.local/share`, `~/.cache` and
+`~/.var/app` by RPM, Flatpak and AppImage applications that are no longer
+installed.
 
-> **Estado:** em desenvolvimento. A etapa atual (coletor) é **somente leitura**:
-> nada é movido nem apagado.
+> **Status:** under development. The current stage (collector) is
+> **read-only**: nothing is moved or deleted.
 
-## Requisitos
+## Requirements
 
-- Fedora com **DNF5** (Fedora 41+); testado no Fedora 45
-- Python 3.10+, sem dependências externas
-- Opcional: `flatpak`
+- Fedora with **DNF5** (Fedora 41+); tested on Fedora 45
+- Python 3.10+, no external dependencies
+- Optional: `flatpak`
 
-## Uso atual (etapa 1 — varredura somente leitura)
+## Current usage (stage 1 - read-only scan)
 
 ```bash
 git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git
 cd Fedora-Sentinel-Uninstaller
-PYTHONPATH=src python3 -m fsu.collector          # tabela
-PYTHONPATH=src python3 -m fsu.collector --json   # JSON
+PYTHONPATH=src python3 -m fsu.collector             # table
+PYTHONPATH=src python3 -m fsu.collector --json      # JSON
+PYTHONPATH=src python3 -m fsu.collector --timings   # time spent per phase
 ```
 
-Execute como **usuário comum** (nunca com `sudo`).
+Run it as a **regular user** (never with `sudo`).
 
-### Como ler o resultado
+### Reading the result
 
-| Score | Ação permitida (etapas futuras) |
+| Score | Allowed action (future stages) |
 |---|---|
-| ≥ 0,70 | Quarentena direta |
-| 0,40 – 0,70 | Quarentena somente com snapshot preventivo |
-| < 0,40 | Apenas listado |
+| >= 0.70 | Direct quarantine |
+| 0.40 - 0.70 | Quarantine only with a preventive snapshot |
+| < 0.40 | Listed only |
 
-## Princípios de segurança
+| Evidence | Score |
+|---|---|
+| `~/.var/app/<id>` of a Flatpak that is not installed | 0.95 |
+| Exact name of a removed RPM package | 0.85 |
+| Exact match through a name variant (`<app>rc`, `<app>-...`) | 0.80 |
+| Launcher pointing to an AppImage that no longer exists | 0.75 |
+| Similar to a removed package | 0.50 - 0.65 |
+| No known match | 0.20 |
+| Similar to something installed | capped at 0.30 |
 
-- O FSU roda como usuário comum; nunca opera arquivos como root.
-- Symlinks nunca são seguidos; montagens não são atravessadas.
-- Se uma fonte de verdade (rpm, dnf5, flatpak) falhar, a categoria que depende
-  dela é ignorada — nunca tudo vira "órfão".
-- Lista de proteção para itens críticos da sessão (dconf, keyrings, autostart,
-  Plasma/GNOME, Flatpak, containers…) e para a própria pasta do FSU.
+## Sources of truth
 
-## Desenvolvimento
+- `rpm -qa` - installed packages
+- `dnf5 history list/info --json` - removed packages
+- `flatpak list --app` - installed Flatpaks
+- `.desktop` files of installed applications
+- AppImages in `~/AppImages`, `~/Applications`, `~/.local/bin` and user
+  launchers in `~/.local/share/applications`
+
+## Safety principles
+
+- FSU runs as a regular user; it never operates on files as root.
+- Symlinks are never followed; mount points are not crossed.
+- If a source of truth (rpm, dnf5, flatpak) fails, the category that depends
+  on it is skipped - things never all become "orphaned".
+- A protection list covers critical session items (dconf, keyrings,
+  autostart, Plasma/GNOME/Qt, Flatpak, containers...) and FSU's own folder.
+- Folders recreated by other software are not candidates. Example: Plasma
+  Browser Integration writes stubs for Flatpak browsers into `~/.var/app` at
+  every login (it can be disabled in *System Settings > Background Services >
+  Plasma Browser Integration Flatpak Integration*).
+
+## Development
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
@@ -49,9 +74,9 @@ pip install -e ".[dev]"
 pytest -m "not fedora" && ruff check . && ruff format --check . && mypy
 ```
 
-Os testes marcados com `fedora` rodam contra `rpm`/`dnf5` reais (job de CI em
-container `fedora:latest`).
+Tests marked `fedora` run against real `rpm`/`dnf5` (CI job in a
+`fedora:latest` container).
 
-## Licença
+## License
 
 GPL-3.0-or-later.

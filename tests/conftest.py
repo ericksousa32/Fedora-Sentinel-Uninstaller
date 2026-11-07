@@ -1,4 +1,4 @@
-"""Utilitários compartilhados pelos testes."""
+"""Shared test helpers."""
 
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ Response = str | BaseException
 
 
 class FakeRunner:
-    """Substitui :func:`fsu.system.run_command` com respostas por prefixo.
+    """Stands in for :func:`fsu.system.run_command`, answering by command prefix.
 
-    A chave mais longa que for prefixo do comando vence. Comandos sem
-    resposta cadastrada levantam ``CommandNotFoundError``.
+    The longest key that is a prefix of the command wins. Commands without a
+    registered answer raise ``CommandNotFoundError``.
     """
 
     def __init__(self, responses: dict[tuple[str, ...], Response]) -> None:
@@ -35,7 +35,7 @@ class FakeRunner:
         self.calls.append(command)
         matches = [k for k in self.responses if command[: len(k)] == k]
         if not matches:
-            raise CommandNotFoundError(command, "executável não encontrado (fake)")
+            raise CommandNotFoundError(command, "executable not found (fake)")
         response = self.responses[max(matches, key=len)]
         if isinstance(response, BaseException):
             raise response
@@ -48,10 +48,12 @@ RPM_INSTALLED = "\n".join(
         "rpm",
         "dnf5",
         "firefox",
-        "gimp",  # removido em 396, mas reinstalado depois
+        "gimp",  # removed in transaction 396, reinstalled later
         "mozilla-filesystem",
         "kdenlive",
         "linuxtoys",
+        "dolphin",
+        "okular-part",
     ]
 )
 

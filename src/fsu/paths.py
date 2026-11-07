@@ -1,4 +1,4 @@
-"""Caminhos fixos usados pelo FSU, relativos ao $HOME."""
+"""Fixed paths used by FSU, relative to $HOME."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fsu.models import Category
 
-# Únicas pastas que o FSU varre (apenas o primeiro nível de cada uma).
+# The only folders FSU scans (first level of each one only).
 SCAN_ROOTS: dict[Category, Path] = {
     Category.CONFIG: Path(".config"),
     Category.DATA: Path(".local/share"),
@@ -14,7 +14,11 @@ SCAN_ROOTS: dict[Category, Path] = {
     Category.FLATPAK: Path(".var/app"),
 }
 
-# Diretório de trabalho do próprio FSU (quarentena, estado). Fica dentro de
-# ~/.local/share e por isso é protegido explicitamente.
+# FSU's own working directory (quarantine, state). It lives inside
+# ~/.local/share and is therefore explicitly protected.
 FSU_DATA_DIR = Path(".local/share/fsu")
 QUARANTINE_DIR = FSU_DATA_DIR / "quarantine"
+
+# User launchers and the usual AppImage locations (Gear Lever uses ~/AppImages).
+USER_APPLICATIONS_DIR = Path(".local/share/applications")
+APPIMAGE_DIRS: tuple[Path, ...] = (Path("AppImages"), Path("Applications"), Path(".local/bin"))

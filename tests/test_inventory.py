@@ -6,12 +6,15 @@ import pytest
 
 from conftest import FakeRunner, default_responses, fixture_text
 from fsu.inventory import (
+    AppImageInventory,
     DesktopIndex,
     DnfHistory,
     FlatpakInventory,
     RpmInventory,
+    appimage_base_name,
     is_noise_package,
     nevra_name,
+    parse_desktop_file,
 )
 from fsu.system import CommandError
 
@@ -52,14 +55,14 @@ def test_rpm_installed_names(fake_runner: FakeRunner) -> None:
 
 
 def test_rpm_empty_inventory_is_an_error() -> None:
-    with pytest.raises(CommandError, match="vazio"):
+    with pytest.raises(CommandError, match="empty"):
         RpmInventory(FakeRunner({("rpm",): "\n"})).installed_names()
 
 
-def test_history_uses_single_range_call(fake_runner: FakeRunner) -> None:
+def test_history_uses_a_single_range_call(fake_runner: FakeRunner) -> None:
     DnfHistory(fake_runner).removed_packages()
     info_calls = [c for c in fake_runner.calls if c[:3] == ("dnf5", "history", "info")]
-    # IDs reais da fixture: 393..405
+    # Real IDs from the fixture: 393..405
     assert info_calls == [("dnf5", "history", "info", "393..405", "--json")]
 
 
@@ -73,10 +76,12 @@ def test_history_removed_packages(fake_runner: FakeRunner) -> None:
         "dotnet-runtime-8.0",
         "hexchat",
         "gimp",
+        "kolourpaint",
+        "kunifiedpush",
     }
-    # "Replaced" (upgrade do firefox) não conta como remoção.
+    # "Replaced" (firefox upgrade) is not a removal.
     assert "firefox" not in removed
-    # Vale a remoção mais recente: 396, não 393.
+    # The most recent removal wins: 396, not 393.
     assert removed["hexchat"].transaction_id == 396
     assert removed["kwebkitpart"].reason == "User"
 
@@ -86,17 +91,18 @@ def test_history_falls_back_to_individual_calls() -> None:
     one = (
         '[{"id": 398, "end_time": 1, "packages": [{"nevra": "a-1-1.x86_64", "action": "Remove"}]}]'
     )
-    responses[("dnf5", "history", "info", "393..405")] = CommandError(["dnf5"], "spec inválida")
+    responses[("dnf5", "history", "info", "393..405")] = CommandError(["dnf5"], "bad spec")
     responses[("dnf5", "history", "info")] = one
     history = DnfHistory(FakeRunner(responses), fallback_limit=3)
     removed = history.removed_packages()
     assert [r.name for r in removed] == ["a"]
-    assert history.warnings and "uma a uma" in history.warnings[0]
+    assert history.warnings
+    assert "one by one" in history.warnings[0]
 
 
 def test_history_invalid_json_is_an_error() -> None:
-    runner = FakeRunner({("dnf5", "history", "list"): "isto não é json"})
-    with pytest.raises(CommandError, match="JSON inválido"):
+    runner = FakeRunner({("dnf5", "history", "list"): "this is not json"})
+    with pytest.raises(CommandError, match="invalid JSON"):
         DnfHistory(runner).removed_packages()
 
 
@@ -105,7 +111,7 @@ def test_history_empty() -> None:
     assert DnfHistory(runner).removed_packages() == []
 
 
-def test_flatpak_filters_translated_header_and_duplicates(fake_runner: FakeRunner) -> None:
+def test_flatpak_filters_localized_header_and_duplicates(fake_runner: FakeRunner) -> None:
     ids = FlatpakInventory(fake_runner).installed_app_ids()
     assert "ID de aplicativo" not in ids
     assert "com.hypixel.HytaleLauncher" in ids
@@ -115,23 +121,83 @@ def test_flatpak_filters_translated_header_and_duplicates(fake_runner: FakeRunne
     assert ids == expected
 
 
-def _desktop(directory: Path, name: str, body: str) -> None:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / name).write_text(body, encoding="utf-8")
+def _write(path: Path, body: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_parse_desktop_file_quoted_exec_with_spaces(tmp_path: Path) -> None:
+    entry = parse_desktop_file(
+        _write(
+            tmp_path / "x.desktop",
+            "[Desktop Entry]\nName=My App\n# comment=ignored\n"
+            'Exec="/home/u/My Apps/my app.AppImage" %F\n',
+        )
+    )
+    assert entry.name == "My App"
+    assert entry.exec_target == "/home/u/My Apps/my app.AppImage"
+    assert entry.is_appimage
 
 
 def test_desktop_index(tmp_path: Path) -> None:
     apps = tmp_path / "applications"
-    _desktop(
-        apps,
-        "code.desktop",
+    _write(
+        apps / "code.desktop",
         "[Desktop Entry]\nName=VS Code\nExec=/usr/share/code/code --unity %F\n"
-        "StartupWMClass=Code\n[Desktop Action new]\nExec=ignorado --new\n",
+        "StartupWMClass=Code\n[Desktop Action new]\nExec=ignored --new\n",
     )
-    _desktop(apps, "org.inkscape.Inkscape.desktop", "[Desktop Entry]\nExec=flatpak run x\n")
-    _desktop(apps, "foo.desktop", "[Desktop Entry]\nExec=env A=1 /usr/bin/foo-bin %U\n")
-    names = DesktopIndex([apps, tmp_path / "inexistente"]).known_names()
+    _write(apps / "org.inkscape.Inkscape.desktop", "[Desktop Entry]\nExec=flatpak run x\n")
+    _write(apps / "com.obsproject.Studio.desktop", "[Desktop Entry]\nExec=flatpak run y\n")
+    _write(apps / "foo.desktop", "[Desktop Entry]\nExec=env A=1 /usr/bin/foo-bin %U\n")
+    names = DesktopIndex([apps, tmp_path / "missing"]).known_names()
     assert {"code", "Code", "org.inkscape.Inkscape", "Inkscape", "foo", "foo-bin"} <= names
-    assert "run" not in names
-    assert "ignorado" not in names
-    assert "env" not in names
+    # Generic last components must not become "installed" names (LM Studio bug).
+    assert "Studio" not in names
+    assert not {"run", "ignored", "env", "flatpak"} & names
+
+
+@pytest.mark.parametrize(
+    ("file_name", "base"),
+    [
+        ("photocraft-0.18.0-linux-x86_64.appimage", "photocraft"),
+        ("LM-Studio-0.3.5-x64.AppImage", "LM-Studio"),
+        ("comfy_desktop.appimage", "comfy_desktop"),
+        ("upscayl.appimage", "upscayl"),
+    ],
+)
+def test_appimage_base_name(file_name: str, base: str) -> None:
+    assert appimage_base_name(file_name) == base
+
+
+def test_appimage_inventory(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    appimages = home / "AppImages"
+    applications = home / ".local/share/applications"
+    _write(appimages / "lmstudio.appimage", "")
+    _write(appimages / "comfy_desktop.appimage", "")
+    _write(
+        applications / "comfy_desktop.desktop",
+        f"[Desktop Entry]\nName=Comfy Desktop\nExec={appimages}/comfy_desktop.appimage\n",
+    )
+    photocraft = _write(
+        applications / "ai.storyteller.photocraft.desktop",
+        "[Desktop Entry]\nName=PhotoCraft\n"
+        f'Exec="{home}/Downloads/photocraft-0.18.0-linux-x86_64.appimage" %F\n'
+        "StartupWMClass=ai.storyteller.photocraft\nX-AppImage-Integrate=false\n",
+    )
+    _write(  # on removable media: a missing file proves nothing
+        applications / "usb.desktop",
+        "[Desktop Entry]\nName=UsbTool\nExec=/run/media/u/usb/usbtool.AppImage\n",
+    )
+    _write(  # not an AppImage: ignored
+        applications / "native.desktop", "[Desktop Entry]\nName=Native\nExec=/usr/bin/nope\n"
+    )
+
+    state = AppImageInventory(home, applications, [appimages]).scan()
+
+    assert {"lmstudio", "comfy_desktop", "Comfy Desktop"} <= state.present_names
+    assert {"photocraft", "PhotoCraft", "ai.storyteller.photocraft"} <= state.missing_names
+    assert "UsbTool" not in state.missing_names
+    assert "Native" not in state.missing_names
+    assert state.stale_launchers == (photocraft,)

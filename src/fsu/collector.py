@@ -1,19 +1,20 @@
-"""Núcleo de coleta (etapa 1): identifica candidatos a resíduo, SOMENTE LEITURA.
+"""Collection core (stage 1): finds residue candidates, READ-ONLY.
 
-Fluxo de :meth:`Collector.collect`:
+:meth:`Collector.collect` works in three steps:
 
-1. Monta os inventários: RPM instalados, removidos no DNF5, Flatpaks
-   instalados e nomes de arquivos ``.desktop``.
-2. Lista o primeiro nível de ``~/.config``, ``~/.local/share``, ``~/.cache``
-   e ``~/.var/app`` sem seguir symlinks (:class:`HomeScanner`).
-3. Descarta itens protegidos e itens que correspondem exatamente a algo
-   instalado; pontua o restante com :mod:`fsu.heuristics`.
+1. Build the inventories: installed RPMs, RPMs removed in DNF5, installed
+   Flatpaks, names from ``.desktop`` files and AppImages (present or gone).
+2. List the first level of ``~/.config``, ``~/.local/share``, ``~/.cache``
+   and ``~/.var/app`` without following symlinks (:class:`HomeScanner`).
+3. Drop protected items, items recreated by other software and items that
+   exactly match something installed; score the rest with
+   :mod:`fsu.heuristics`.
 
-Falha segura: se a fonte necessária para julgar uma categoria não estiver
-disponível (ex.: ``rpm`` ou ``flatpak`` ausentes), essa categoria inteira é
-ignorada, em vez de tudo parecer "órfão".
+Fail-safe: if the source needed to judge a category is unavailable (e.g.
+``rpm`` or ``flatpak`` missing), that whole category is skipped instead of
+everything looking "orphaned".
 
-Este módulo nunca cria, move, altera ou apaga arquivos.
+This module never creates, moves, changes or deletes files.
 """
 
 from __future__ import annotations
@@ -23,13 +24,17 @@ import json
 import os
 import stat
 import sys
+import time
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
 from fsu import heuristics
+from fsu.heuristics import Match, MatchKind, NameIndex
 from fsu.inventory import (
     DEFAULT_DESKTOP_DIRS,
     USER_FLATPAK_DESKTOP_DIR,
+    AppImageInventory,
+    AppImageState,
     DesktopIndex,
     DnfHistory,
     FlatpakInventory,
@@ -37,22 +42,28 @@ from fsu.inventory import (
     is_noise_package,
 )
 from fsu.models import Candidate, Category, Evidence, ScanReport
-from fsu.paths import SCAN_ROOTS
+from fsu.paths import APPIMAGE_DIRS, SCAN_ROOTS, USER_APPLICATIONS_DIR
 from fsu.protected import is_protected
 from fsu.system import CommandError, CommandNotFoundError, Runner, run_command
 
-# Últimos componentes de IDs Flatpak genéricos demais para servirem de nome
-# (com.spotify.Client, org.telegram.desktop, com.obsproject.Studio…).
-_GENERIC_ID_PARTS = frozenset(
-    {"desktop", "client", "studio", "launcher", "app", "application", "editor", "player"}
+# Plasma Browser Integration (Plasma >= 6.3) writes native-messaging stubs for
+# Flatpak browsers into ~/.var/app at every login, even if the browser is not
+# installed. Such folders are recreated, so quarantining them is pointless.
+PBI_HOST_FILE = "plasma-browser-integration-host"
+PBI_MANIFEST_FILE = "org.kde.plasma.browser_integration.json"
+PBI_MARKER = b"plasma-browser-integration"
+PBI_HINT = (
+    "they are recreated at login by Plasma Browser Integration; to stop it, disable "
+    "'Plasma Browser Integration Flatpak Integration' in System Settings > "
+    "Background Services"
 )
 
 
 def measure(path: Path) -> tuple[int, bool]:
-    """Tamanho em bytes de ``path`` sem seguir symlinks nem cruzar montagens.
+    """Size in bytes of ``path`` without following symlinks or crossing mounts.
 
-    Devolve ``(bytes, completo)``; ``completo`` é ``False`` se alguma parte
-    não pôde ser lida ou estava em outro sistema de arquivos.
+    Returns ``(bytes, complete)``; ``complete`` is ``False`` if any part could
+    not be read or lived on another file system.
     """
     root_stat = path.lstat()
     if not stat.S_ISDIR(root_stat.st_mode):
@@ -75,7 +86,7 @@ def measure(path: Path) -> tuple[int, bool]:
                     continue
                 if stat.S_ISDIR(entry_stat.st_mode):
                     if entry_stat.st_dev != root_stat.st_dev:
-                        complete = False  # ponto de montagem: não atravessa
+                        complete = False  # mount point: do not cross it
                         continue
                     stack.append(entry.path)
                 else:
@@ -83,8 +94,40 @@ def measure(path: Path) -> tuple[int, bool]:
     return total, complete
 
 
+def is_generated_stub(path: Path) -> bool:
+    """Whether a ``~/.var/app/<id>`` folder only holds Plasma Browser Integration stubs.
+
+    True only if the marker host file exists (and mentions the integrator) and
+    every other file is the native-messaging manifest. Any other content - or
+    any symlink - means real data and returns False.
+    """
+    if path.is_symlink() or not path.is_dir():
+        return False
+    host = path / PBI_HOST_FILE
+    try:
+        if host.is_symlink() or not host.is_file():
+            return False
+        with host.open("rb") as handle:
+            if PBI_MARKER not in handle.read(4096):
+                return False
+    except OSError:
+        return False
+    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+        current = Path(dirpath)
+        for name in dirnames:
+            if (current / name).is_symlink():
+                return False
+        for name in filenames:
+            file = current / name
+            if file == host:
+                continue
+            if name != PBI_MANIFEST_FILE or file.is_symlink():
+                return False
+    return True
+
+
 class HomeScanner:
-    """Lista os itens de primeiro nível das raízes de varredura."""
+    """Lists the first-level items of the scan roots."""
 
     def __init__(self, home: Path) -> None:
         self.home = home
@@ -94,45 +137,49 @@ class HomeScanner:
         for category, relative_root in SCAN_ROOTS.items():
             root = self.home / relative_root
             if root.is_symlink():
-                # Raiz apontando para outro lugar (ex.: gerenciador de dotfiles):
-                # fora do escopo seguro desta etapa.
-                self.warnings.append(f"{root} é um symlink; raiz ignorada por segurança.")
+                # Root pointing elsewhere (e.g. a dotfiles manager): out of the
+                # safe scope of this stage.
+                self.warnings.append(f"{root} is a symlink; root skipped for safety.")
                 continue
             if not root.is_dir():
                 continue
             try:
                 names = sorted(child.name for child in root.iterdir())
             except OSError as exc:
-                self.warnings.append(f"não foi possível listar {root}: {exc}")
+                self.warnings.append(f"cannot list {root}: {exc}")
                 continue
             for name in names:
                 yield category, root / name
 
 
 class Collector:
-    """Orquestra inventários, varredura do $HOME e pontuação."""
+    """Orchestrates inventories, the $HOME scan and scoring."""
 
     def __init__(
         self,
         home: Path | None = None,
         runner: Runner = run_command,
         desktop_dirs: Iterable[Path] | None = None,
+        appimage_dirs: Iterable[Path] | None = None,
     ) -> None:
         self.home = (home or Path.home()).absolute()
         self._runner = runner
         if desktop_dirs is None:
             desktop_dirs = (*DEFAULT_DESKTOP_DIRS, self.home / USER_FLATPAK_DESKTOP_DIR)
         self._desktop_dirs = tuple(desktop_dirs)
+        if appimage_dirs is None:
+            appimage_dirs = tuple(self.home / d for d in APPIMAGE_DIRS)
+        self._appimage_dirs = tuple(appimage_dirs)
 
-    # -- inventários ---------------------------------------------------------
+    # -- inventories ---------------------------------------------------------
 
     def _rpm_installed(self, warnings: list[str]) -> frozenset[str] | None:
         try:
             return RpmInventory(self._runner).installed_names()
         except CommandError as exc:
             warnings.append(
-                f"Inventário RPM indisponível ({exc}); ~/.config, ~/.local/share e "
-                "~/.cache não serão avaliados."
+                f"RPM inventory unavailable ({exc}); ~/.config, ~/.local/share and "
+                "~/.cache will not be evaluated."
             )
             return None
 
@@ -141,7 +188,7 @@ class Collector:
         try:
             removed = history.removed_packages()
         except CommandError as exc:
-            warnings.append(f"Histórico do DNF5 indisponível ({exc}).")
+            warnings.append(f"DNF5 history unavailable ({exc}).")
             return set()
         finally:
             warnings.extend(history.warnings)
@@ -152,12 +199,57 @@ class Collector:
         try:
             return FlatpakInventory(self._runner).installed_app_ids()
         except CommandNotFoundError:
-            warnings.append("Flatpak não encontrado; ~/.var/app não será avaliado.")
+            warnings.append("Flatpak not found; ~/.var/app will not be evaluated.")
         except CommandError as exc:
-            warnings.append(f"Inventário Flatpak indisponível ({exc}); ~/.var/app ignorado.")
+            warnings.append(f"Flatpak inventory unavailable ({exc}); ~/.var/app skipped.")
         return None
 
-    # -- pontuação -----------------------------------------------------------
+    def _appimages(self, warnings: list[str]) -> AppImageState:
+        state = AppImageInventory(
+            self.home, self.home / USER_APPLICATIONS_DIR, self._appimage_dirs
+        ).scan()
+        warnings.extend(state.warnings)
+        return state
+
+    # -- scoring -------------------------------------------------------------
+
+    @staticmethod
+    def _score_rpm_or_appimage(
+        name: str, removed: NameIndex, missing_appimages: NameIndex, evidence: list[Evidence]
+    ) -> tuple[float, str | None]:
+        """Best score among removed RPMs and gone AppImages (0.20 if neither)."""
+        options: list[tuple[float, str, Evidence]] = []
+
+        rpm = removed.match(name)
+        if rpm is not None:
+            if rpm.kind is MatchKind.EXACT:
+                score = (
+                    heuristics.SCORE_EXACT_REMOVED
+                    if rpm.variant is None
+                    else heuristics.SCORE_VARIANT_REMOVED
+                )
+                detail = f"removed package: {rpm.name}" + _via(rpm)
+            else:
+                score = heuristics.partial_removed_score(rpm.strength)
+                detail = f"similar to removed package {rpm.name} ({rpm.strength:.2f})" + _via(rpm)
+            options.append((score, rpm.name, Evidence("dnf5-history", detail)))
+
+        app = missing_appimages.match(name)
+        if app is not None:
+            if app.kind is MatchKind.EXACT:
+                score = heuristics.SCORE_EXACT_STALE_APPIMAGE
+                detail = f"launcher points to a missing AppImage: {app.name}" + _via(app)
+            else:
+                score = heuristics.partial_removed_score(app.strength)
+                detail = f"similar to missing AppImage {app.name} ({app.strength:.2f})" + _via(app)
+            options.append((score, app.name, Evidence("appimage", detail)))
+
+        if not options:
+            evidence.append(Evidence("heuristic", "no known match"))
+            return heuristics.SCORE_NO_MATCH, None
+        options.sort(key=lambda o: (-o[0], o[1]))
+        evidence.extend(o[2] for o in options)
+        return options[0][0], options[0][1]
 
     def _candidate(
         self, path: Path, category: Category, score: float, evidence: list[Evidence],
@@ -166,18 +258,20 @@ class Collector:
         try:
             info = path.lstat()
         except OSError as exc:
-            warnings.append(f"não foi possível inspecionar {path}: {exc}")
+            warnings.append(f"cannot inspect {path}: {exc}")
             return None
         is_link = stat.S_ISLNK(info.st_mode)
         if is_link:
             size, complete = 0, True
-            evidence.append(Evidence("fsu", "symlink: só o link será considerado, nunca o destino"))
+            evidence.append(
+                Evidence("fsu", "symlink: only the link is considered, never its target")
+            )
         else:
             size, complete = measure(path)
         if not complete:
-            warnings.append(f"tamanho de {path} é parcial (conteúdo ilegível ou outra montagem).")
+            warnings.append(f"size of {path} is partial (unreadable content or another mount).")
         if info.st_uid != os.getuid():
-            evidence.append(Evidence("fsu", f"dono diferente do usuário atual (uid {info.st_uid})"))
+            evidence.append(Evidence("fsu", f"owned by another user (uid {info.st_uid})"))
         return Candidate(
             path=path,
             category=category,
@@ -192,26 +286,43 @@ class Collector:
 
     def collect(self) -> ScanReport:
         warnings: list[str] = []
-        rpm_installed = self._rpm_installed(warnings)
-        removed = self._removed(rpm_installed, warnings)
-        flatpak_ids = self._flatpak_installed(warnings)
+        timings: dict[str, float] = {}
+        clock = time.perf_counter()
 
+        def lap(phase: str) -> None:
+            nonlocal clock
+            now = time.perf_counter()
+            timings[phase] = now - clock
+            clock = now
+
+        rpm_installed = self._rpm_installed(warnings)
+        lap("rpm")
+        removed = self._removed(rpm_installed, warnings)
+        lap("dnf5_history")
+        flatpak_ids = self._flatpak_installed(warnings)
+        lap("flatpak")
         desktop = DesktopIndex(self._desktop_dirs)
-        installed_names: set[str] = set(desktop.known_names())
+        desktop_names = desktop.known_names()
         warnings.extend(desktop.warnings)
-        if rpm_installed:
-            installed_names |= rpm_installed
-        if flatpak_ids:
-            installed_names |= flatpak_ids
-            installed_names |= {
-                last
-                for last in (app_id.rsplit(".", 1)[1] for app_id in flatpak_ids)
-                if len(last) >= 4 and last.lower() not in _GENERIC_ID_PARTS
-            }
+        lap("desktop_files")
+        appimages = self._appimages(warnings)
+        lap("appimages")
+
+        installed_exact: set[str] = set(rpm_installed or ()) | set(flatpak_ids or ())
+        installed_names: set[str] = installed_exact | desktop_names | appimages.present_names
+        for app_id in flatpak_ids or ():
+            part = heuristics.useful_id_part(app_id)
+            if part:
+                installed_names.add(part)
+        installed_index = NameIndex(installed_names)
+        removed_index = NameIndex(removed)
+        missing_index = NameIndex(appimages.missing_names)
+        lap("indexes")
 
         scanner = HomeScanner(self.home)
         candidates: list[Candidate] = []
         protected: list[Path] = []
+        regenerated: list[Path] = []
         installed_skipped = 0
 
         for category, path in scanner.entries():
@@ -228,50 +339,50 @@ class Collector:
                 if path.name in flatpak_ids:
                     installed_skipped += 1
                     continue
+                if is_generated_stub(path):
+                    regenerated.append(path)
+                    continue
                 score = heuristics.SCORE_FLATPAK_ORPHAN
                 matched = path.name
-                evidence.append(Evidence("flatpak", f"app {path.name} não está instalado"))
+                evidence.append(Evidence("flatpak", f"app {path.name} is not installed"))
             else:
                 if rpm_installed is None:
                     continue
-                installed_match = heuristics.best_match(path.name, installed_names)
-                if installed_match and installed_match.kind is heuristics.MatchKind.EXACT:
+                owners = heuristics.DIRECTORY_OWNERS.get(heuristics.normalize(path.name))
+                if owners and any(owner in installed_exact for owner in owners):
                     installed_skipped += 1
                     continue
-                removed_match = heuristics.best_match(path.name, removed)
-                if removed_match is None:
-                    score = heuristics.SCORE_NO_MATCH
-                    evidence.append(Evidence("heuristic", "sem correspondência conhecida"))
-                elif removed_match.kind is heuristics.MatchKind.EXACT:
-                    score = heuristics.SCORE_EXACT_REMOVED
-                    matched = removed_match.name
+                removed_owner = next((o for o in owners or () if o in removed), None)
+                installed_match = installed_index.match(path.name)
+                if installed_match is not None and installed_match.kind is MatchKind.EXACT:
+                    installed_skipped += 1
+                    continue
+                if removed_owner is not None:
+                    score, matched = heuristics.SCORE_EXACT_REMOVED, removed_owner
                     evidence.append(
-                        Evidence("dnf5-history", f"pacote removido: {removed_match.name}")
+                        Evidence("dnf5-history", f"folder owned by removed package {removed_owner}")
                     )
                 else:
-                    score = heuristics.partial_removed_score(removed_match.strength)
-                    matched = removed_match.name
-                    evidence.append(
-                        Evidence(
-                            "dnf5-history",
-                            f"semelhante ao pacote removido {removed_match.name} "
-                            f"({removed_match.strength:.2f})",
-                        )
+                    score, matched = self._score_rpm_or_appimage(
+                        path.name, removed_index, missing_index, evidence
                     )
                 if installed_match is not None:
                     score = min(score, heuristics.SCORE_CAP_PARTIAL_INSTALLED)
                     evidence.append(
                         Evidence(
                             "installed",
-                            f"semelhante ao instalado {installed_match.name} "
-                            f"({installed_match.strength:.2f})",
+                            f"similar to installed {installed_match.name} "
+                            f"({installed_match.strength:.2f})" + _via(installed_match),
                         )
                     )
 
             candidate = self._candidate(path, category, score, evidence, matched, warnings)
             if candidate is not None:
                 candidates.append(candidate)
+        lap("scan_and_score")
 
+        if regenerated:
+            warnings.append(f"{len(regenerated)} folder(s) in ~/.var/app skipped: {PBI_HINT}.")
         warnings.extend(scanner.warnings)
         candidates.sort(key=lambda c: (-c.score, str(c.path)))
         return ScanReport(
@@ -279,10 +390,17 @@ class Collector:
             warnings=tuple(warnings),
             protected_skipped=tuple(protected),
             installed_skipped=installed_skipped,
+            regenerated_skipped=tuple(regenerated),
+            stale_launchers=appimages.stale_launchers,
+            timings=timings,
         )
 
 
-# -- execução manual (provisória, até o cli.py da etapa 4) ---------------------
+def _via(match: Match) -> str:
+    return f" (via '{match.variant}')" if match.variant else ""
+
+
+# -- manual run (temporary, until stage 4's cli.py) -----------------------------
 
 
 def _human_size(size: int) -> str:
@@ -297,10 +415,11 @@ def _human_size(size: int) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m fsu.collector",
-        description="Varredura SOMENTE LEITURA de resíduos no $HOME.",
+        description="READ-ONLY scan for application residues in $HOME.",
     )
-    parser.add_argument("--json", action="store_true", help="saída em JSON")
-    parser.add_argument("--home", type=Path, default=None, help="home alternativa (testes)")
+    parser.add_argument("--json", action="store_true", help="JSON output")
+    parser.add_argument("--timings", action="store_true", help="print time spent per phase")
+    parser.add_argument("--home", type=Path, default=None, help="alternative home (testing)")
     args = parser.parse_args(argv)
 
     report = Collector(home=args.home).collect()
@@ -315,12 +434,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"      └─ {reasons}")
     total = sum(c.size_bytes for c in report.candidates)
     print(
-        f"\n{len(report.candidates)} candidatos ({_human_size(total)}); "
-        f"{len(report.protected_skipped)} protegidos; "
-        f"{report.installed_skipped} correspondem a algo instalado."
+        f"\n{len(report.candidates)} candidates ({_human_size(total)}); "
+        f"{len(report.protected_skipped)} protected; "
+        f"{report.installed_skipped} match something installed; "
+        f"{len(report.regenerated_skipped)} recreated by other software."
     )
+    for launcher in report.stale_launchers:
+        print(f"stale launcher (AppImage is gone): {launcher}")
     for warning in report.warnings:
-        print(f"aviso: {warning}", file=sys.stderr)
+        print(f"warning: {warning}", file=sys.stderr)
+    if args.timings:
+        for phase, seconds in report.timings.items():
+            print(f"timing: {phase:<15} {seconds:7.2f}s", file=sys.stderr)
     return 0
 
 

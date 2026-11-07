@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fedora-sentinel-uninstaller"
 version = "0.1.0.dev0"
-description = "Ferramenta inteligente, segura e cirúrgica para o saneamento de dados residuais no Fedora Linux."
+description = "An intelligent, safe and surgical tool for cleaning up residual data on Fedora Linux."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.10"
-# Sem dependências de execução: apenas a biblioteca padrão do Python.
+# No runtime dependencies: Python standard library only.
 dependencies = []
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -30,7 +30,7 @@ fsu = ["py.typed"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
-    "fedora: testes de integração que exigem um Fedora real (rpm, dnf5)",
+    "fedora: integration tests that need a real Fedora system (rpm, dnf5)",
 ]
 
 [tool.ruff]
@@ -41,12 +41,12 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "PTH", "S", "RUF"]
 ignore = [
-    "S603", # subprocess sem shell: uso intencional e controlado em fsu.system
-    "RUF001", "RUF002", "RUF003", # acentuação em português nos textos/comentários
+    "S603", # subprocess without a shell: intentional and controlled in fsu.system
+    "RUF001", "RUF002", "RUF003", # non-ASCII characters in test data and output
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S108"]
+"tests/**" = ["S101", "S108", "S311"]
 
 [tool.mypy]
 python_version = "3.10"

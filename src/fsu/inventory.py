@@ -1,34 +1,39 @@
-"""Fontes de verdade sobre o que está (ou esteve) instalado no sistema.
+"""Sources of truth about what is (or was) installed on the system.
 
-* :class:`RpmInventory` — pacotes RPM instalados agora (``rpm -qa``).
-* :class:`DnfHistory` — pacotes removidos segundo o histórico do DNF5
-  (``dnf5 history list/info --json``). Não lê arquivos de log nem o
-  ``/var/lib/dnf`` do DNF4.
-* :class:`FlatpakInventory` — aplicativos Flatpak instalados (usuário e sistema).
-* :class:`DesktopIndex` — nomes conhecidos a partir dos arquivos ``.desktop``
-  de aplicativos instalados (evita falsos positivos como ``~/.config/Code``).
+* :class:`RpmInventory` - RPM packages installed now (``rpm -qa``).
+* :class:`DnfHistory` - packages removed according to the DNF5 history
+  (``dnf5 history list/info --json``). It neither parses log files nor reads
+  DNF4's ``/var/lib/dnf``.
+* :class:`FlatpakInventory` - installed Flatpak apps (user and system).
+* :class:`DesktopIndex` - names taken from the ``.desktop`` files of installed
+  applications (avoids false positives such as ``~/.config/Code``).
+* :class:`AppImageInventory` - AppImages present in the usual folders and user
+  launchers that point to AppImages (present or gone).
 
-Todas as classes são somente leitura.
+All classes are read-only.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shlex
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from fsu.heuristics import useful_id_part
 from fsu.models import RemovedPackage
 from fsu.system import CommandError, Runner, run_command
 
-# Ações do DNF5 que significam que o pacote saiu do sistema. "Replaced" e
-# "Obsoleted" não entram: o nome normalmente continua instalado em outra versão
-# ou sob outro pacote que o substitui.
+# DNF5 actions meaning the package left the system. "Replaced" and
+# "Obsoleted" are excluded: the name usually stays installed in another
+# version or under the package that replaces it.
 _REMOVE_ACTIONS = frozenset({"remove", "removed"})
 
-# Pacotes que praticamente nunca criam pastas próprias no $HOME. Ignorá-los
-# reduz ruído (ex.: remover um app leva junto várias bibliotecas).
+# Packages that practically never create their own folders in $HOME.
+# Ignoring them reduces noise (removing an app also removes its libraries).
 _NOISE_SUFFIXES = (
     "-devel", "-libs", "-doc", "-docs", "-debuginfo", "-debugsource", "-static",
     "-headers", "-common", "-data", "-filesystem", "-fonts", "-langpacks",
@@ -37,21 +42,21 @@ _NOISE_PREFIXES = (
     "python3-", "perl-", "golang-", "rust-", "texlive-", "ghc-", "ocaml-",
     "lib", "kf5-", "kf6-", "qt5-", "qt6-", "glibc-", "langpacks-",
 )  # fmt: skip
-# Exceções ao prefixo "lib" que são aplicativos de verdade.
+# Exceptions to the "lib" prefix that are real applications.
 _NOISE_PREFIX_EXCEPTIONS = ("libre",)  # libreoffice, librewolf
 
 _FLATPAK_ID = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)+$")
 
 
 def nevra_name(nevra: str) -> str:
-    """Extrai o nome de um NEVRA: ``nome-[época:]versão-release.arch``."""
+    """Extract the name from a NEVRA: ``name-[epoch:]version-release.arch``."""
     without_arch = nevra.rsplit(".", 1)[0] if "." in nevra else nevra
     parts = without_arch.rsplit("-", 2)
     return parts[0] if len(parts) == 3 else without_arch
 
 
 def is_noise_package(name: str) -> bool:
-    """Pacotes de biblioteca/suporte que não geram resíduos próprios no $HOME."""
+    """Library/support packages that do not leave residues of their own in $HOME."""
     lowered = name.lower()
     if lowered.endswith(_NOISE_SUFFIXES):
         return True
@@ -61,7 +66,7 @@ def is_noise_package(name: str) -> bool:
 
 
 class RpmInventory:
-    """Pacotes RPM atualmente instalados."""
+    """RPM packages currently installed."""
 
     def __init__(self, runner: Runner = run_command) -> None:
         self._runner = runner
@@ -70,14 +75,14 @@ class RpmInventory:
         output = self._runner(["rpm", "-qa", "--queryformat", "%{NAME}\\n"])
         names = frozenset(line.strip() for line in output.splitlines() if line.strip())
         if not names:
-            # Um Fedora sem nenhum RPM instalado é impossível: trate como falha
-            # para que nada seja julgado com base em um inventário vazio.
-            raise CommandError(["rpm", "-qa"], "inventário vazio")
+            # A Fedora system with no RPM installed is impossible: treat it as a
+            # failure so that nothing is judged against an empty inventory.
+            raise CommandError(["rpm", "-qa"], "empty inventory")
         return names
 
 
 class DnfHistory:
-    """Leitura do histórico de transações do DNF5 (formato JSON)."""
+    """Reads the DNF5 transaction history (JSON format)."""
 
     def __init__(self, runner: Runner = run_command, fallback_limit: int = 150) -> None:
         self._runner = runner
@@ -89,23 +94,23 @@ class DnfHistory:
         try:
             data = json.loads(output) if output.strip() else []
         except json.JSONDecodeError as exc:
-            raise CommandError(args, f"JSON inválido: {exc.msg}") from exc
+            raise CommandError(args, f"invalid JSON: {exc.msg}") from exc
         if not isinstance(data, list):
-            raise CommandError(args, "JSON inesperado: esperado um array")
+            raise CommandError(args, "unexpected JSON: expected an array")
         return [item for item in data if isinstance(item, dict)]
 
     def transaction_ids(self) -> list[int]:
-        """IDs de todas as transações registradas (ordem decrescente)."""
+        """IDs of every recorded transaction (descending order)."""
         transactions = self._json(["dnf5", "history", "list", "--json"])
         ids = {t["id"] for t in transactions if isinstance(t.get("id"), int)}
         return sorted(ids, reverse=True)
 
     def _details(self, ids: list[int]) -> list[dict[str, Any]]:
-        """Detalhes (com pacotes) das transações.
+        """Details (with packages) of the transactions.
 
-        Tenta uma única chamada com intervalo (``min..max``). Se a versão do
-        DNF5 não aceitar, cai para chamadas individuais nas transações mais
-        recentes, limitadas por ``fallback_limit``.
+        Tries a single call with a range (``min..max``), confirmed to work on
+        dnf5 5.4.6. If the DNF5 version rejects it, falls back to one call per
+        transaction for the most recent ones, limited by ``fallback_limit``.
         """
         if not ids:
             return []
@@ -114,8 +119,8 @@ class DnfHistory:
             return self._json(["dnf5", "history", "info", spec, "--json"])
         except CommandError as exc:
             self.warnings.append(
-                f"dnf5 history info com intervalo falhou ({exc}); consultando as "
-                f"{min(len(ids), self._fallback_limit)} transações mais recentes uma a uma."
+                f"dnf5 history info with a range failed ({exc}); querying the "
+                f"{min(len(ids), self._fallback_limit)} most recent transactions one by one."
             )
         details: list[dict[str, Any]] = []
         for tid in ids[: self._fallback_limit]:
@@ -123,10 +128,11 @@ class DnfHistory:
         return details
 
     def removed_packages(self) -> list[RemovedPackage]:
-        """Pacotes removidos, com a remoção mais recente de cada nome.
+        """Removed packages, keeping the most recent removal of each name.
 
-        Não desconta pacotes reinstalados depois: isso é feito pelo coletor
-        cruzando com :class:`RpmInventory`, que é a fonte do estado atual.
+        Packages reinstalled later are *not* filtered here: the collector does
+        that by cross-checking :class:`RpmInventory`, the source of the current
+        state.
         """
         latest: dict[str, RemovedPackage] = {}
         for transaction in self._details(self.transaction_ids()):
@@ -156,68 +162,102 @@ class DnfHistory:
 
 
 class FlatpakInventory:
-    """Aplicativos Flatpak instalados (instalações de usuário e de sistema)."""
+    """Installed Flatpak applications (user and system installations)."""
 
     def __init__(self, runner: Runner = run_command) -> None:
         self._runner = runner
 
     def installed_app_ids(self) -> frozenset[str]:
         output = self._runner(["flatpak", "list", "--app", "--columns=application"])
-        # Filtra cabeçalhos (que podem vir traduzidos, ex.: "ID de aplicativo")
-        # aceitando apenas linhas com formato de ID Flatpak.
+        # Drop headers (possibly localized, e.g. "ID de aplicativo") by
+        # accepting only lines shaped like a Flatpak ID.
         return frozenset(
             line.strip() for line in output.splitlines() if _FLATPAK_ID.match(line.strip())
         )
 
 
-# Locais de .desktop de aplicativos instalados. ~/.local/share/applications
-# fica de fora de propósito: pode conter atalhos órfãos de apps removidos.
-DEFAULT_DESKTOP_DIRS: tuple[Path, ...] = (
-    Path("/usr/share/applications"),
-    Path("/usr/local/share/applications"),
-    Path("/var/lib/flatpak/exports/share/applications"),
-)
-USER_FLATPAK_DESKTOP_DIR = Path(".local/share/flatpak/exports/share/applications")
+# -- .desktop parsing -----------------------------------------------------------
 
-_EXEC_WRAPPERS = frozenset({"env", "sh", "bash", "flatpak", "pkexec", "sudo", "gio", "xdg-open"})
+_EXEC_WRAPPERS = frozenset({"env", "sh", "bash", "pkexec", "sudo", "gio", "xdg-open"})
+
+
+@dataclass
+class DesktopEntry:
+    """The few ``[Desktop Entry]`` keys FSU cares about."""
+
+    path: Path
+    name: str = ""
+    startup_wm_class: str = ""
+    exec_target: str = ""  # first real program of Exec (wrappers skipped)
+    is_flatpak_launcher: bool = False
+    is_appimage: bool = False
+
+
+def _exec_target(value: str) -> tuple[str, bool]:
+    """First real program in an ``Exec`` value and whether it is ``flatpak run``."""
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        tokens = value.split()
+    for token in tokens:
+        if "=" in token and not token.startswith("/"):
+            continue  # environment variables (FOO=bar)
+        program = Path(token).name
+        if program == "flatpak":
+            return "", True
+        if program in _EXEC_WRAPPERS or program.startswith("-"):
+            continue
+        return ("" if token.startswith("%") else token), False
+    return "", False
+
+
+def parse_desktop_file(path: Path) -> DesktopEntry:
+    """Parse the main ``[Desktop Entry]`` group of a ``.desktop`` file."""
+    entry = DesktopEntry(path=path)
+    in_entry = False
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            in_entry = line == "[Desktop Entry]"
+            continue
+        if not in_entry or "=" not in line or line.startswith("#"):
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if key == "Name":
+            entry.name = value
+        elif key == "StartupWMClass":
+            entry.startup_wm_class = value
+        elif key == "Exec":
+            entry.exec_target, entry.is_flatpak_launcher = _exec_target(value)
+        elif key.startswith("X-AppImage-"):
+            entry.is_appimage = True
+    if entry.exec_target.lower().endswith(".appimage"):
+        entry.is_appimage = True
+    return entry
+
+
+def _id_names(stem: str) -> set[str]:
+    names = {stem}
+    part = useful_id_part(stem)
+    if part:
+        names.add(part)
+    return names
 
 
 class DesktopIndex:
-    """Nomes associados a aplicativos instalados, extraídos de arquivos ``.desktop``."""
+    """Names associated with installed applications, from ``.desktop`` files."""
 
     def __init__(self, directories: Iterable[Path]) -> None:
         self._directories = tuple(directories)
         self.warnings: list[str] = []
 
     @staticmethod
-    def _names_from_file(path: Path) -> set[str]:
-        names = {path.stem}
-        # Último componente de IDs reverse-DNS: org.inkscape.Inkscape -> Inkscape
-        if "." in path.stem:
-            names.add(path.stem.rsplit(".", 1)[1])
-        in_entry = False
-        for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = raw.strip()
-            if line.startswith("["):
-                in_entry = line == "[Desktop Entry]"
-                continue
-            if not in_entry or "=" not in line:
-                continue
-            key, value = (part.strip() for part in line.split("=", 1))
-            if key == "StartupWMClass" and value:
-                names.add(value)
-            elif key == "Exec" and value:
-                for token in value.split():
-                    if "=" in token and not token.startswith("/"):
-                        continue  # variáveis de ambiente (FOO=bar)
-                    binary = Path(token.strip("\"'")).name
-                    if binary == "flatpak":
-                        break  # "flatpak run <id>": o ID já vem do nome do arquivo
-                    if binary in _EXEC_WRAPPERS:
-                        continue
-                    if binary and not binary.startswith("%"):
-                        names.add(binary)
-                    break
+    def names_for(entry: DesktopEntry) -> set[str]:
+        names = _id_names(entry.path.stem)
+        if entry.startup_wm_class:
+            names.add(entry.startup_wm_class)
+        if entry.exec_target:
+            names.add(Path(entry.exec_target).name)
         return {n for n in names if n}
 
     def known_names(self) -> frozenset[str]:
@@ -228,11 +268,119 @@ class DesktopIndex:
             try:
                 files = sorted(directory.glob("*.desktop"))
             except OSError as exc:
-                self.warnings.append(f"não foi possível listar {directory}: {exc}")
+                self.warnings.append(f"cannot list {directory}: {exc}")
                 continue
             for desktop_file in files:
                 try:
-                    names |= self._names_from_file(desktop_file)
+                    names |= self.names_for(parse_desktop_file(desktop_file))
                 except OSError as exc:
-                    self.warnings.append(f"não foi possível ler {desktop_file}: {exc}")
+                    self.warnings.append(f"cannot read {desktop_file}: {exc}")
         return frozenset(names)
+
+
+# Default locations of .desktop files of installed applications. The user's
+# ~/.local/share/applications is handled by AppImageInventory instead: it may
+# contain stale launchers of removed applications.
+DEFAULT_DESKTOP_DIRS: tuple[Path, ...] = (
+    Path("/usr/share/applications"),
+    Path("/usr/local/share/applications"),
+    Path("/var/lib/flatpak/exports/share/applications"),
+)
+USER_FLATPAK_DESKTOP_DIR = Path(".local/share/flatpak/exports/share/applications")
+
+
+# -- AppImages ------------------------------------------------------------------
+
+# "photocraft-0.18.0-linux-x86_64" -> "photocraft"; "LM-Studio-0.3.5" -> "LM-Studio"
+_VERSION_TAIL = re.compile(r"^(.+?)[-_. ]v?\d")
+# Locations that may simply be unmounted: a missing file there proves nothing.
+_REMOVABLE_PREFIXES = (Path("/run/media"), Path("/media"), Path("/mnt"))
+
+
+def appimage_base_name(file_name: str) -> str:
+    """AppImage file name without extension and version suffix."""
+    stem = file_name[: -len(".appimage")] if file_name.lower().endswith(".appimage") else file_name
+    match = _VERSION_TAIL.match(stem)
+    return match.group(1) if match else stem
+
+
+@dataclass(frozen=True)
+class AppImageState:
+    present_names: frozenset[str]  # AppImages that exist (in use)
+    missing_names: frozenset[str]  # launchers whose AppImage is gone
+    stale_launchers: tuple[Path, ...]
+    warnings: tuple[str, ...] = field(default=())
+
+
+class AppImageInventory:
+    """AppImages in the usual folders plus user launchers pointing to AppImages.
+
+    * A launcher whose AppImage exists, or an AppImage file in one of the
+      folders, makes its names *present* (protected).
+    * A launcher whose AppImage is gone - and the path is inside $HOME, not on
+      removable media - makes its names *missing* (evidence of removal).
+    """
+
+    def __init__(self, home: Path, applications_dir: Path, appimage_dirs: Iterable[Path]) -> None:
+        self._home = home
+        self._applications_dir = applications_dir
+        self._appimage_dirs = tuple(appimage_dirs)
+
+    @staticmethod
+    def _entry_names(entry: DesktopEntry) -> set[str]:
+        names = DesktopIndex.names_for(entry)
+        if entry.exec_target:
+            names.add(appimage_base_name(Path(entry.exec_target).name))
+        if entry.name:
+            names.add(entry.name)
+        if entry.startup_wm_class:
+            names |= _id_names(entry.startup_wm_class)
+        return {n for n in names if n}
+
+    def _is_judgeable_missing(self, target: Path) -> bool:
+        if not target.is_absolute():
+            return False
+        if any(target.is_relative_to(prefix) for prefix in _REMOVABLE_PREFIXES):
+            return False
+        return target.is_relative_to(self._home)
+
+    def scan(self) -> AppImageState:
+        present: set[str] = set()
+        missing: set[str] = set()
+        stale: list[Path] = []
+        warnings: list[str] = []
+
+        for directory in self._appimage_dirs:
+            if not directory.is_dir():
+                continue
+            try:
+                for file in directory.iterdir():
+                    if file.name.lower().endswith(".appimage"):
+                        present.add(appimage_base_name(file.name))
+            except OSError as exc:
+                warnings.append(f"cannot list {directory}: {exc}")
+
+        if self._applications_dir.is_dir():
+            for desktop_file in sorted(self._applications_dir.glob("*.desktop")):
+                try:
+                    entry = parse_desktop_file(desktop_file)
+                except OSError as exc:
+                    warnings.append(f"cannot read {desktop_file}: {exc}")
+                    continue
+                if not entry.is_appimage or not entry.exec_target:
+                    continue
+                target = Path(entry.exec_target).expanduser()
+                names = self._entry_names(entry)
+                if target.exists():
+                    present |= names
+                elif self._is_judgeable_missing(target):
+                    missing |= names
+                    stale.append(desktop_file)
+
+        # A name that is present wins over the same name in a stale launcher.
+        return AppImageState(
+            present_names=frozenset(present),
+            missing_names=frozenset(missing - present),
+            stale_launchers=tuple(stale),
+            warnings=tuple(warnings),
+        )
