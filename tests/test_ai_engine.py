@@ -287,3 +287,50 @@ def test_rationale_is_cut_at_a_word_boundary(ollama: FakeOllama, home: Path) -> 
     rationale = review.opinions[home / ".cache/x"].rationale
     assert len(rationale) <= 300
     assert rationale.endswith("word…")
+
+
+@pytest.mark.parametrize(
+    ("name", "remote"),
+    [
+        ("gpt-oss:120b-cloud", True),
+        ("qwen3-coder:480b-cloud", True),
+        ("deepseek-v3.1:671b-cloud", True),
+        ("kimi-k3:cloud", True),
+        ("gpt-oss:20b", False),
+        ("soundcloud-helper:7b", False),  # "cloud" inside a word is not the marker
+        ("gemma4:12b", False),
+    ],
+)
+def test_looks_remote(name: str, remote: bool) -> None:
+    from fsu.ai_engine import looks_remote
+
+    assert looks_remote(name) is remote
+
+
+def test_cloud_models_are_never_auto_selected(ollama: FakeOllama, home: Path) -> None:
+    ollama.models = []
+    ollama.remote = {
+        "gpt-oss:120b-cloud": {},
+        "mystery:latest": {"remote_host": "https://ollama.com:443", "remote_model": "x"},
+    }
+    make(home / ".cache/x/a")
+    review = _review(ollama, home, [home / ".cache/x"], [0.20])
+    assert not review.available
+    assert ollama.generate_bodies() == []
+
+
+@pytest.mark.parametrize("model", ["gpt-oss:120b-cloud", "mystery", "mystery:latest"])
+def test_explicit_cloud_model_is_refused(ollama: FakeOllama, home: Path, model: str) -> None:
+    ollama.remote = {"mystery:latest": {"remote_host": "https://ollama.com:443"}}
+    make(home / ".cache/x/a")
+    engine = AiEngine(OllamaClient(ollama.url), model=model)
+    review = engine.review([candidate(home / ".cache/x", home, 0.20)])
+    assert not review.available
+    assert "refusing cloud model" in review.warnings[0]
+    assert ollama.generate_bodies() == []
+
+
+def test_generate_refuses_cloud_names(ollama: FakeOllama) -> None:
+    with pytest.raises(AiUnavailableError, match="cloud"):
+        OllamaClient(ollama.url).generate("gpt-oss:120b-cloud", "{}")
+    assert ollama.generate_bodies() == []

@@ -158,7 +158,8 @@ The AI is an **advisor, never an executor**:
   reach the prompt, so a manipulated answer can only make FSU more careful.
 
 Privacy and robustness: only loopback addresses are accepted, system proxies
-are bypassed, only names and metadata are sent (never file contents), answers
+are bypassed, Ollama "cloud" models (e.g. `gpt-oss:120b-cloud`, which the
+local service forwards to remote servers) are refused, only names and metadata are sent (never file contents), answers
 must match a JSON schema, and after 3 consecutive failures the remaining items
 are not sent. FSU never starts the Ollama service and never downloads models;
 if Ollama is unavailable the scan simply continues without opinions.

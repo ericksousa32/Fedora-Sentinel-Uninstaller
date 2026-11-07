@@ -74,6 +74,8 @@ class FakeOllama:
 
     def __init__(self) -> None:
         self.models = ["qwen2.5:7b", "nomic-embed-text:latest"]
+        # name -> extra fields, e.g. {"remote_host": "https://ollama.com:443"}
+        self.remote: dict[str, dict[str, Any]] = {}
         self.requests: list[tuple[str, dict[str, Any] | None]] = []
         self.answer: Answer = lambda body: (
             200,
@@ -98,7 +100,9 @@ class FakeOllama:
                 if self.path == "/api/version":
                     self._send(200, {"version": "0.12.0"})
                 elif self.path == "/api/tags":
-                    self._send(200, {"models": [{"name": m} for m in fake.models]})
+                    entries = [{"name": m} for m in fake.models]
+                    entries += [{"name": n, **extra} for n, extra in fake.remote.items()]
+                    self._send(200, {"models": entries})
                 else:
                     self._send(404, {"error": "not found"})
 

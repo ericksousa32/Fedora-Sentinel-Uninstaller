@@ -12,7 +12,8 @@ So even a manipulated answer (folder names are attacker-controllable data and
 end up in the prompt) can only make FSU *more* careful.
 
 Privacy: only loopback addresses are accepted, system proxies are bypassed,
-and only names/metadata are sent - never file contents.
+Ollama "cloud" models (proxied by the local service to remote servers) are
+refused, and only names/metadata are sent - never file contents.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import enum
 import ipaddress
 import json
 import os
+import re
 import stat
 import time
 import urllib.error
@@ -188,13 +190,25 @@ class OllamaClient:
     def version(self) -> str:
         return str(self._request("/api/version").get("version", "unknown"))
 
-    def models(self) -> list[str]:
+    def model_entries(self) -> list[dict[str, Any]]:
         models = self._request("/api/tags").get("models", [])
         if not isinstance(models, list):
             return []
-        return [str(m["name"]) for m in models if isinstance(m, dict) and "name" in m]
+        return [m for m in models if isinstance(m, dict) and "name" in m]
+
+    def models(self) -> list[str]:
+        """Names of the installed models that run on this machine."""
+        return [str(m["name"]) for m in self.model_entries() if not is_remote_model(m)]
+
+    def remote_models(self) -> list[str]:
+        """Names of "cloud" models: listed locally but executed on remote servers."""
+        return [str(m["name"]) for m in self.model_entries() if is_remote_model(m)]
 
     def generate(self, model: str, prompt: str) -> dict[str, Any]:
+        if looks_remote(model):
+            raise AiUnavailableError(
+                f"refusing cloud model {model!r}: data would leave this machine"
+            )
         payload = self._request(
             "/api/generate",
             {
@@ -213,6 +227,25 @@ class OllamaClient:
         if not isinstance(answer, dict):
             raise ValueError("answer is not a JSON object")
         return answer
+
+
+_CLOUD_TOKEN = re.compile(r"(^|[-:_./])cloud($|[-:_./])", re.IGNORECASE)
+
+
+def looks_remote(name: str) -> bool:
+    """Ollama "cloud" models are named like ``gpt-oss:120b-cloud``."""
+    return bool(_CLOUD_TOKEN.search(name))
+
+
+def is_remote_model(entry: dict[str, Any]) -> bool:
+    """A model entry from ``/api/tags`` that runs on remote servers.
+
+    Cloud models are proxied by the local Ollama service to ollama.com, so
+    the loopback-only rule alone would not keep the data on this machine.
+    """
+    return looks_remote(str(entry.get("name", ""))) or bool(
+        entry.get("remote_host") or entry.get("remote_model")
+    )
 
 
 def choose_model(installed: Sequence[str], preferred: str | None = None) -> str | None:
@@ -330,6 +363,15 @@ class AiEngine:
         """Return the model to use, or raise :class:`AiUnavailableError` with the reason."""
         self.client.version()
         installed = self.client.models()
+        remote = self.client.remote_models()
+        if self.preferred_model and (
+            looks_remote(self.preferred_model)
+            or any(self.preferred_model in (r, r.split(":")[0]) for r in remote)
+        ):
+            raise AiUnavailableError(
+                f"refusing cloud model {self.preferred_model!r}: it runs on remote servers, "
+                "so the names of your folders would leave this machine; use a local model"
+            )
         model = choose_model(installed, self.preferred_model)
         if model is None:
             if self.preferred_model:
