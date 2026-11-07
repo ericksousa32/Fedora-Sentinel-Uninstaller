@@ -22,7 +22,8 @@ This should be rare, and it means the evidence is misleading — please check it
   file; the app may live somewhere else now.
 
 If it was quarantined anyway, `fsu restore <id>` puts it back. Consider
-reporting the case: a wrong high-confidence item is a bug.
+reporting the case (include the output of `fsu --version`): a wrong
+high-confidence item is a bug.
 
 ### "I know X is a leftover, but FSU does not propose it."
 

@@ -7,6 +7,28 @@ fsu --version
 
 All commands refuse to run as root, through `sudo` or through `pkexec`.
 
+## Version and help
+
+Show the installed version. Handy to check that the alias or the installation
+works, and worth including when you report a problem:
+
+```bash
+fsu --version
+```
+
+List the commands with a one-line description of each:
+
+```bash
+fsu --help
+```
+
+Show every option of one command — replace `restore` with the command you
+want to know about:
+
+```bash
+fsu restore --help
+```
+
 ## `fsu scan`
 
 Lists residue candidates. Changes nothing in your files (it only updates
