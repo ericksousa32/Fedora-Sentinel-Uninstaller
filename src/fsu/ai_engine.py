@@ -92,6 +92,10 @@ most recent modification of any file inside it. Reads are not tracked. A long
 time without writes suggests abandonment, but some data is legitimately rarely
 written.
 
+Not finding a program, launcher or process with the item's name is WEAK
+evidence: applications often bundle the tools they use (AppImages, Flatpaks)
+or use a different name.
+
 A recent modification date does NOT prove that the application is still
 installed: applications are often removed shortly after their last use. Do not
 claim that software is installed unless the heuristic evidence says so.

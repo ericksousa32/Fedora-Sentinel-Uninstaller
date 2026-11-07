@@ -29,7 +29,7 @@ Run it as a **regular user**: FSU refuses to run as root, via `sudo` or via
 
 | Command | What it does |
 |---|---|
-| `fsu scan [--json] [--timings] [--ai]` | Read-only report of candidates |
+| `fsu scan [--json] [--timings] [--ai] [--no-history]` | Report of candidates (changes nothing except FSU's own history) |
 | `fsu quarantine` | Shows the plan; **changes nothing** |
 | `fsu quarantine --apply` | Moves the planned items to quarantine after a `[y/N]` confirmation (`--yes` for scripts) |
 | `fsu quarantine --select PATH` | Includes a list-only item (always needs a Snapper snapshot) |
@@ -58,6 +58,7 @@ Nothing is ever deleted automatically. Exit codes: `0` success, `1` error,
 | Launcher pointing to an AppImage that no longer exists | 0.75 |
 | Launcher/service whose program (path or Flatpak) is gone | 0.85 |
 | Launcher/service whose bare program name is not found | 0.75 |
+| FSU's own history saw the program/AppImage, and it is gone now | 0.75 |
 | Similar to a removed package | 0.50 - 0.65 |
 | No known match | 0.20 |
 | Similar to something installed | capped at 0.30 |
@@ -88,6 +89,27 @@ name not found in the search path scores 0.75. Entries with `Hidden=true`
 (intentional overrides of system autostart entries), commands run through a
 shell or interpreter, variables and removable media are never judged. A timer
 is listed together with its service.
+
+## FSU's inventory history
+
+RPM and Flatpak record removals; an AppImage, a program in `~/.local/bin` or a
+tool in `/opt` disappears without any record. So every scan records, in
+`$XDG_STATE_HOME/fsu/inventory.json` (`~/.local/state/fsu/`), what exists
+outside package managers: AppImage files, programs run by your launchers in
+`~/.local/share/applications`, and programs outside the system directories.
+On later scans, a name that **existed before and is gone now** is concrete
+evidence (0.75) for the folders it left behind.
+
+- It only works from the first scan on: it cannot recover older removals.
+- An application updated to a new file name (e.g. by Gear Lever) is not "gone"
+  as long as its name is still present; paths on removable media never count.
+- Only paths and names are stored, locally. `--no-history` skips updating the
+  file (existing evidence is still used).
+
+List-only items also show objective **facts** that never change the score:
+the last write, and whether a program, launcher or running process with the
+item's name exists. Not finding one is weak evidence (apps often bundle their
+tools), so it is shown, not scored.
 
 ## Sources of truth
 
@@ -209,10 +231,11 @@ These come from testing on a real Fedora 45 (KDE Plasma) system.
   same minute. FSU only uses modification times ("last write").
 - **The AI is advice only.** Across three local models it was right on roughly
   half of the ambiguous items; it can demote an item, never promote one.
-- **Not every write is avoided.** A scan is read-only for your data, but
-  `dnf5 history` (run as your user) keeps its own log in
-  `~/.local/state/dnf5.log*` (rotated by dnf5, about 5 MB at most), and
-  listing folders updates their access times.
+- **Not every write is avoided.** A scan never changes your data, but it
+  updates FSU's inventory history (`~/.local/state/fsu/inventory.json`, see
+  above; `--no-history` to skip), `dnf5 history` (run as your user) keeps its
+  own log in `~/.local/state/dnf5.log*` (rotated by dnf5, about 5 MB at
+  most), and listing folders updates their access times.
 - **Other users' processes are invisible** to a regular user, so files held by
   system services cannot be detected as "in use".
 - **Moves never cross file systems or Btrfs subvolumes**; such items are blocked.

@@ -31,6 +31,7 @@ SCORE_EXACT_REMOVED = 0.85
 SCORE_VARIANT_REMOVED = 0.80  # exact match through a name variant (e.g. "<app>rc")
 SCORE_OWNER_REMOVED = 0.80  # folder owned (per DIRECTORY_OWNERS) by a removed package
 SCORE_EXACT_STALE_APPIMAGE = 0.75  # launcher points to an AppImage that is gone
+SCORE_SEEN_THEN_GONE = 0.75  # FSU's own history saw the program, now it is gone
 SCORE_LAUNCHER_TARGET_MISSING = 0.85  # launcher/service runs a path or Flatpak that is gone
 SCORE_LAUNCHER_PROGRAM_NOT_FOUND = 0.75  # bare program name not found in the search path
 SCORE_PARTIAL_REMOVED_MIN = 0.50

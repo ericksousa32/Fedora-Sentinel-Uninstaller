@@ -86,6 +86,7 @@ def isolated_executables(
     monkeypatch.setattr(inventory, "default_executable_dirs", lambda home: [])
     monkeypatch.setattr(inventory, "OPT_ROOT", empty / "opt")
     monkeypatch.setattr(inventory, "PIPX_VENV_DIRS", ())
+    monkeypatch.setattr(inventory, "running_process_names", lambda *a, **k: set())
 
 
 @pytest.fixture

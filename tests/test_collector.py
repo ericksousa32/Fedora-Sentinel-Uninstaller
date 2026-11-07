@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -183,6 +184,7 @@ def test_report_counters(populated_home: Path, fake_runner: FakeRunner, desktop_
     protected = {str(p.relative_to(populated_home)) for p in report.protected_skipped}
     assert protected == {
         ".ssh",
+        ".local/state/fsu",  # FSU's own inventory history
         ".config/dconf",
         ".config/KDE",
         ".local/share/fsu",
@@ -223,19 +225,39 @@ def test_stub_with_symlink_is_not_a_stub(tmp_path: Path) -> None:
     assert not is_generated_stub(app)
 
 
-def test_collector_is_read_only(
+def test_collector_only_writes_its_own_history(
     populated_home: Path, fake_runner: FakeRunner, desktop_dir: Path
 ) -> None:
     (populated_home / ".config/external-link").symlink_to(desktop_dir)
+    (populated_home / ".local/state").mkdir(parents=True, exist_ok=True)  # as on real systems
+    history_dir = str(populated_home / ".local/state/fsu")
+
+    def outside_history(state: dict[str, tuple[int, int, float, bytes | str]]) -> dict[str, Any]:
+        return {k: v for k, v in state.items() if not k.startswith(history_dir)}
+
     before = _snapshot(populated_home.parent)
     before_outside = _snapshot(desktop_dir)
     _report(populated_home, fake_runner, desktop_dir)
-    assert _snapshot(populated_home.parent) == before
+    after = _snapshot(populated_home.parent)
+    state_dir = str(populated_home / ".local/state")
+    # Only the state folder's own timestamps change (a child was created in it).
+    assert {k: v for k, v in outside_history(after).items() if k != state_dir} == {
+        k: v for k, v in outside_history(before).items() if k != state_dir
+    }
+    assert set(after) - set(before) == {history_dir, history_dir + "/inventory.json"}
     assert _snapshot(desktop_dir) == before_outside
     # No external command that changes the system was called.
     allowed = {("rpm",), ("dnf5", "history"), ("flatpak", "list")}
     for call in fake_runner.calls:
         assert any(call[: len(prefix)] == prefix for prefix in allowed), call
+
+
+def test_collector_without_history_is_read_only(
+    populated_home: Path, fake_runner: FakeRunner, desktop_dir: Path
+) -> None:
+    before = _snapshot(populated_home.parent)
+    Collector(populated_home, fake_runner, [desktop_dir], record_history=False).collect()
+    assert _snapshot(populated_home.parent) == before
 
 
 def test_symlinks_are_never_followed(

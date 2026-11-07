@@ -17,6 +17,7 @@ All classes are read-only.
 
 from __future__ import annotations
 
+import contextlib
 import enum
 import json
 import os
@@ -347,7 +348,7 @@ class AppImageInventory:
         self._appimage_dirs = tuple(appimage_dirs)
 
     @staticmethod
-    def _entry_names(entry: DesktopEntry) -> set[str]:
+    def entry_names(entry: DesktopEntry) -> set[str]:
         names = DesktopIndex.names_for(entry)
         if entry.exec_target:
             names.add(appimage_base_name(Path(entry.exec_target).name))
@@ -394,7 +395,7 @@ class AppImageInventory:
                 if not entry.is_appimage or not entry.exec_target:
                     continue
                 target = Path(entry.exec_target).expanduser()
-                names = self._entry_names(entry)
+                names = self.entry_names(entry)
                 if target.exists():
                     present |= names
                 elif self._is_judgeable_missing(target):
@@ -612,3 +613,28 @@ def parse_unit_file(path: Path) -> UnitFile:
         elif key == "Unit" and not unit:
             unit = value
     return UnitFile(exec_line, unit)
+
+
+# -- running processes ------------------------------------------------------------------
+
+
+def running_process_names(proc_root: Path = Path("/proc"), uid: int | None = None) -> set[str]:
+    """Names (comm and executable) of the current user's running processes."""
+    uid = os.getuid() if uid is None else uid
+    names: set[str] = set()
+    try:
+        pid_dirs = [p for p in proc_root.iterdir() if p.name.isdigit()]
+    except OSError:
+        return names
+    for pid_dir in pid_dirs:
+        try:
+            if pid_dir.stat().st_uid != uid:
+                continue
+            comm = (pid_dir / "comm").read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            continue
+        if comm:
+            names.add(comm)
+        with contextlib.suppress(OSError):
+            names.add((pid_dir / "exe").readlink().name.removesuffix(" (deleted)"))
+    return {n for n in names if n}

@@ -107,7 +107,12 @@ def _confirm(ctx: Context, question: str, assume_yes: bool) -> bool:
 
 
 def _scan(ctx: Context, args: argparse.Namespace) -> tuple[ScanReport, AiReview | None]:
-    report = Collector(home=ctx.home, runner=ctx.runner, desktop_dirs=ctx.desktop_dirs).collect()
+    report = Collector(
+        home=ctx.home,
+        runner=ctx.runner,
+        desktop_dirs=ctx.desktop_dirs,
+        record_history=not getattr(args, "no_history", False),
+    ).collect()
     review = None
     if getattr(args, "ai", False):
         engine = AiEngine(OllamaClient(args.ollama_url), args.model, clock=ctx.clock)
@@ -341,6 +346,14 @@ def _purge(ctx: Context, args: argparse.Namespace, store: QuarantineStore) -> in
 # -- parser ---------------------------------------------------------------------------
 
 
+def _add_history_option(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--no-history",
+        action="store_true",
+        help="do not update FSU's inventory history (it is still read)",
+    )
+
+
 def _add_ai_options(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("local AI advice (optional, off by default)")
     group.add_argument("--ai", action="store_true", help="ask a local Ollama model for advice")
@@ -359,6 +372,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser("scan", help="read-only report of residue candidates")
     scan.add_argument("--json", action="store_true", help="JSON output")
     scan.add_argument("--timings", action="store_true", help="time spent per phase")
+    _add_history_option(scan)
     _add_ai_options(scan)
     scan.set_defaults(func=cmd_scan)
 
@@ -379,6 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="quarantine medium-confidence items even if no Snapper snapshot can be taken",
     )
+    _add_history_option(quarantine)
     _add_ai_options(quarantine)
     quarantine.set_defaults(func=cmd_quarantine)
 

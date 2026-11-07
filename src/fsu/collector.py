@@ -23,10 +23,10 @@ import os
 import stat
 import time
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from fsu import heuristics, inventory
+from fsu import heuristics, history, inventory
 from fsu.heuristics import Match, MatchKind, NameIndex
 from fsu.inventory import (
     DEFAULT_DESKTOP_DIRS,
@@ -44,7 +44,7 @@ from fsu.inventory import (
     parse_desktop_file,
     parse_unit_file,
 )
-from fsu.models import Candidate, Category, Evidence, ScanReport
+from fsu.models import Action, Candidate, Category, Evidence, ScanReport
 from fsu.paths import APPIMAGE_DIRS, scan_roots, user_applications_dir
 from fsu.protected import is_protected
 from fsu.safeguard import symlink_in_chain
@@ -217,6 +217,7 @@ class Collector:
         appimage_dirs: Iterable[Path] | None = None,
         executable_dirs: Iterable[Path] | None = None,
         opt_root: Path | None = None,
+        record_history: bool = True,
     ) -> None:
         self.home = (home or Path.home()).absolute()
         self._runner = runner
@@ -228,6 +229,7 @@ class Collector:
         self._appimage_dirs = tuple(appimage_dirs)
         self._executable_dirs = None if executable_dirs is None else tuple(executable_dirs)
         self._opt_root = opt_root
+        self._record_history = record_history
 
     # -- inventories ---------------------------------------------------------
 
@@ -278,6 +280,8 @@ class Collector:
         missing_appimages: NameIndex,
         evidence: list[Evidence],
         use_variants: bool = True,
+        gone: NameIndex | None = None,
+        gone_entries: dict[str, history.GoneEntry] | None = None,
     ) -> tuple[float, str | None]:
         """Best score among removed RPMs and gone AppImages (0.20 if neither)."""
         options: list[tuple[float, str, Evidence]] = []
@@ -305,6 +309,15 @@ class Collector:
                 score = heuristics.partial_removed_score(app.strength)
                 detail = f"similar to missing AppImage {app.name} ({app.strength:.2f})" + _via(app)
             options.append((score, app.name, Evidence("appimage", detail)))
+
+        seen = gone.match(name, use_variants) if gone is not None else None
+        if seen is not None and seen.kind is MatchKind.EXACT and gone_entries:
+            entry = gone_entries[seen.name]
+            when = time.strftime("%Y-%m-%d", time.localtime(entry.last_seen))
+            detail = f"{entry.kind} {entry.path} was present on {when} and is gone" + _via(seen)
+            options.append(
+                (heuristics.SCORE_SEEN_THEN_GONE, seen.name, Evidence("fsu-history", detail))
+            )
 
         if not options:
             evidence.append(Evidence("heuristic", "no known match"))
@@ -412,6 +425,19 @@ class Collector:
         ).scan()
         warnings.extend(executables.warnings)
         lap("executables")
+        observed = history.observe(
+            self._appimage_dirs, user_applications_dir(self.home), executables.names
+        )
+        past = history.InventoryHistory(history.history_path(self.home)).update(
+            observed, record=self._record_history
+        )
+        warnings.extend(past.warnings)
+        gone_names: dict[str, history.GoneEntry] = {}
+        for entry in past.gone:
+            for name in entry.names:
+                gone_names.setdefault(name, entry)
+        processes = inventory.running_process_names()
+        lap("history")
 
         installed_exact: set[str] = set(rpm_installed or ()) | set(flatpak_ids or ())
         installed_names: set[str] = installed_exact | desktop_names | appimages.present_names
@@ -423,6 +449,9 @@ class Collector:
         removed_index = NameIndex(removed)
         missing_index = NameIndex(appimages.missing_names)
         executable_index = NameIndex(executables.names)
+        gone_index = NameIndex(gone_names)
+        launcher_index = NameIndex(appimages.present_names | desktop_names)
+        process_index = NameIndex(processes)
         lap("indexes")
 
         scanner = HomeScanner(self.home)
@@ -499,7 +528,13 @@ class Collector:
                     )
                 else:
                     score, matched = self._score_rpm_or_appimage(
-                        path.name, removed_index, missing_index, evidence, variants
+                        path.name,
+                        removed_index,
+                        missing_index,
+                        evidence,
+                        variants,
+                        gone_index,
+                        gone_names,
                     )
                     if not variants and score < heuristics.SCORE_EXACT_STALE_APPIMAGE:
                         score = heuristics.SCORE_NO_MATCH  # no partial matches in $HOME
@@ -518,6 +553,10 @@ class Collector:
                 continue
             candidate = self._candidate(path, category, score, evidence, matched, warnings)
             if candidate is not None:
+                if candidate.action is Action.LIST_ONLY:
+                    candidate = _with_facts(
+                        candidate, executable_index, launcher_index, process_index
+                    )
                 candidates.append(candidate)
 
         # A timer of a removed service fires a unit that no longer works.
@@ -556,6 +595,29 @@ class Collector:
             timings=timings,
             low_confidence_hidden=hidden,
         )
+
+
+def _with_facts(
+    candidate: Candidate, programs: NameIndex, launchers: NameIndex, processes: NameIndex
+) -> Candidate:
+    """Objective facts for a list-only item, to help the user decide.
+
+    Facts never change the score: a missing program proves nothing (apps often
+    bundle their tools), and a partial name match may be a coincidence.
+    """
+    name = candidate.path.name
+    found = []
+    for label, index in (("program", programs), ("launcher", launchers), ("process", processes)):
+        match = index.match(name)
+        if match is not None and match.kind is MatchKind.EXACT:
+            found.append(f"{label} '{match.name}' exists")
+    if candidate.last_activity:
+        days = max(0, int((time.time() - candidate.last_activity) / 86400))
+        facts = [f"last write {days} day(s) ago"]
+    else:
+        facts = []
+    facts += found or [f"no program, launcher or running process named '{name}' found"]
+    return replace(candidate, evidence=(*candidate.evidence, Evidence("facts", "; ".join(facts))))
 
 
 def _short_list(names: list[str], limit: int = 3) -> str:
