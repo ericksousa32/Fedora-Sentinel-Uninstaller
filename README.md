@@ -5,9 +5,9 @@ on Fedora Linux: folders left in `~/.config`, `~/.local/share`, `~/.cache` and
 `~/.var/app` by RPM, Flatpak and AppImage applications that are no longer
 installed.
 
-> **Status:** under development. Stage 1 (read-only collector) and stage 2
-> (safety checks and reversible quarantine, Python API only) are done; the
-> command-line interface comes in stage 4.
+> **Status:** under development. Stage 1 (read-only collector), stage 2
+> (safety checks and reversible quarantine) and stage 3 (local AI advisor)
+> are done as Python APIs; the command-line interface comes in stage 4.
 
 ## Requirements
 
@@ -114,6 +114,31 @@ sudo snapper -c home set-config TIMELINE_CREATE=no
 ```
 
 One snapshot is created per batch, only when a batch item needs it.
+
+## Local AI advisor (stage 3)
+
+An optional second opinion from a model running in [Ollama](https://ollama.com)
+on the same machine:
+
+```bash
+PYTHONPATH=src python3 -m fsu.ai_engine            # auto-selects an installed model
+PYTHONPATH=src python3 -m fsu.ai_engine --model qwen2.5:7b
+```
+
+The AI is an **advisor, never an executor**:
+
+- items scored >= 0.70 are never sent to it;
+- for list-only items (< 0.40) it gives an opinion (`residue`, `in_use`,
+  `uncertain`) to help you decide, but they stay list-only;
+- for medium items (0.40 - 0.70) it may only *demote* an item it believes is
+  in use; it can never promote anything. Folder names are untrusted data that
+  reach the prompt, so a manipulated answer can only make FSU more careful.
+
+Privacy and robustness: only loopback addresses are accepted, system proxies
+are bypassed, only names and metadata are sent (never file contents), answers
+must match a JSON schema, and after 3 consecutive failures the remaining items
+are not sent. FSU never starts the Ollama service and never downloads models;
+if Ollama is unavailable the scan simply continues without opinions.
 
 ## Development
 
