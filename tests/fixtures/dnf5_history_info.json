@@ -1,0 +1,103 @@
+[
+  {
+    "id": 400,
+    "start_time": 1793755130,
+    "end_time": 1793755132,
+    "user_id": 1000,
+    "user_name": "erick",
+    "status": "Ok",
+    "releasever": "45",
+    "description": "dnf update --refresh",
+    "comment": "",
+    "rpmdb_version_begin": "a",
+    "rpmdb_version_end": "b",
+    "packages": [
+      {"nevra": "firefox-145.0-1.fc45.x86_64", "action": "Upgrade", "reason": "User", "repository": "updates"},
+      {"nevra": "firefox-144.0-1.fc45.x86_64", "action": "Replaced", "reason": "User", "repository": "@System"}
+    ]
+  },
+  {
+    "id": 398,
+    "start_time": 1793736761,
+    "end_time": 1793736763,
+    "user_id": 1000,
+    "user_name": "erick",
+    "status": "Ok",
+    "releasever": "45",
+    "description": "dnf remove kwebkitpart",
+    "comment": "",
+    "rpmdb_version_begin": "c",
+    "rpmdb_version_end": "d",
+    "packages": [
+      {"nevra": "kwebkitpart-1.4.0-0.30.20190110.fc45.x86_64", "action": "Remove", "reason": "User", "repository": "@System"},
+      {"nevra": "kf5-kparts-5.116.0-3.fc45.x86_64", "action": "Remove", "reason": "Dependency", "repository": "@System"},
+      {"nevra": "qt5-qtwebkit-5.212.0-0.92.alpha4.fc45.x86_64", "action": "Remove", "reason": "Dependency", "repository": "@System"}
+    ]
+  },
+  {
+    "id": 397,
+    "start_time": 1793736744,
+    "end_time": 1793736746,
+    "user_id": 1000,
+    "user_name": "erick",
+    "status": "Ok",
+    "releasever": "45",
+    "description": "dnf remove aspnetcore-runtime-8.0",
+    "comment": "",
+    "rpmdb_version_begin": "e",
+    "rpmdb_version_end": "f",
+    "packages": [
+      {"nevra": "aspnetcore-runtime-8.0-8.0.21-1.fc45.x86_64", "action": "Remove", "reason": "User", "repository": "@System"},
+      {"nevra": "dotnet-runtime-8.0-8.0.21-1.fc45.x86_64", "action": "Remove", "reason": "Dependency", "repository": "@System"}
+    ]
+  },
+  {
+    "id": 396,
+    "start_time": 1793736628,
+    "end_time": 1793736630,
+    "user_id": 1000,
+    "user_name": "erick",
+    "status": "Ok",
+    "releasever": "45",
+    "description": "dnf autoremove",
+    "comment": "",
+    "rpmdb_version_begin": "g",
+    "rpmdb_version_end": "h",
+    "packages": [
+      {"nevra": "hexchat-2.16.2-9.fc45.x86_64", "action": "Remove", "reason": "Clean", "repository": "@System"},
+      {"nevra": "gimp-2:3.0.4-1.fc45.x86_64", "action": "Remove", "reason": "Clean", "repository": "@System"}
+    ]
+  },
+  {
+    "id": 395,
+    "start_time": 1793735204,
+    "end_time": 1793735208,
+    "user_id": 1000,
+    "user_name": "erick",
+    "status": "Ok",
+    "releasever": "45",
+    "description": "dnf install -y /tmp/linuxtoys-7.9.3-1.x86_64.rpm",
+    "comment": "",
+    "rpmdb_version_begin": "i",
+    "rpmdb_version_end": "j",
+    "packages": [
+      {"nevra": "linuxtoys-7.9.3-1.x86_64", "action": "Install", "reason": "User", "repository": "@commandline"}
+    ]
+  },
+  {
+    "id": 393,
+    "start_time": 1793733790,
+    "end_time": 1793734513,
+    "user_id": 0,
+    "user_name": "root",
+    "status": "Ok",
+    "releasever": "44",
+    "description": "dnf system-upgrade download --releasever=45",
+    "comment": "",
+    "rpmdb_version_begin": "k",
+    "rpmdb_version_end": "l",
+    "packages": [
+      {"nevra": "hexchat-2.16.2-8.fc44.x86_64", "action": "Remove", "reason": "User", "repository": "@System"}
+    ]
+  }
+]

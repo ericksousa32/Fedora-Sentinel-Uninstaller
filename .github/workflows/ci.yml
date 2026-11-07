@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Tipos
+        run: mypy
+      - name: Testes (sem Fedora)
+        run: pytest -m "not fedora"
+
+  fedora:
+    name: Integração (Fedora real)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências
+        run: dnf5 -y install python3 python3-pytest
+      - name: Gerar uma transação de remoção real no histórico do DNF5
+        run: |
+          dnf5 -y install cowsay
+          dnf5 -y remove cowsay
+          cat /etc/fedora-release
+          dnf5 --version | head -1
+      - name: Testes de integração
+        env:
+          PYTHONPATH: src
+          FSU_EXPECT_REMOVED: cowsay
+        run: python3 -m pytest -m fedora -v
