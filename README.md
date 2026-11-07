@@ -28,11 +28,17 @@ The complete, user-friendly documentation is in [`docs/`](docs/README.md):
 ## Usage
 
 ```bash
-git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git
-cd Fedora-Sentinel-Uninstaller
-pip install --user .        # installs the `fsu` command in ~/.local/bin
-# or, without installing:  PYTHONPATH=src python3 -m fsu <command>
+git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+
+# Run without installing (alias kept in every terminal):
+echo "alias fsu='PYTHONPATH=\$HOME/Fedora-Sentinel-Uninstaller/src python3 -m fsu'" >> ~/.bashrc
+source ~/.bashrc
+
+# ...or install the `fsu` command in ~/.local/bin, following the repository:
+pip install --user -e ~/Fedora-Sentinel-Uninstaller
 ```
+
+See [Getting started](docs/getting-started.md#2-get-fsu) for all options.
 
 Run it as a **regular user**: FSU refuses to run as root, via `sudo` or via
 `pkexec`.

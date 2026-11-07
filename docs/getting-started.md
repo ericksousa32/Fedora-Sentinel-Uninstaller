@@ -11,20 +11,64 @@ minutes, most of which is reading what FSU found.
   snapshots, see [Safety model](safety.md#snapshots)), **Ollama** (for the
   optional [AI advisor](ai-advisor.md)).
 
-## 2. Install
+## 2. Get FSU
+
+First, download it:
 
 ```bash
-git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git
-cd Fedora-Sentinel-Uninstaller
+git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+```
+
+Then choose **one** of the ways below to get the `fsu` command.
+
+### Option A — run without installing (recommended while testing)
+
+Nothing is installed; FSU runs straight from the folder you cloned. Add an
+alias to your shell so `fsu` works in every terminal:
+
+```bash
+echo "alias fsu='PYTHONPATH=\$HOME/Fedora-Sentinel-Uninstaller/src python3 -m fsu'" >> ~/.bashrc
+source ~/.bashrc
+```
+
+- The alias uses the **full path** of the folder, so `fsu` works from any
+  directory. If you cloned somewhere else, adjust the path.
+- `source ~/.bashrc` applies it to the current terminal; new terminals pick
+  it up automatically. (Using zsh? Write to `~/.zshrc` instead.)
+- To update: `git -C ~/Fedora-Sentinel-Uninstaller pull` — nothing else.
+- To remove: delete the `alias fsu=…` line from `~/.bashrc` and the folder.
+
+Just want to try it once, without the alias? From inside the cloned folder:
+
+```bash
+cd ~/Fedora-Sentinel-Uninstaller
+PYTHONPATH=src python3 -m fsu scan
+```
+
+> An alias typed directly in a terminal (without `>> ~/.bashrc`) only lasts
+> until that terminal is closed — if `fsu` stops being found, this is why.
+
+### Option B — install, following the repository (editable)
+
+```bash
+cd ~/Fedora-Sentinel-Uninstaller
+pip install --user -e .
+```
+
+This installs the `fsu` command in `~/.local/bin` (already in your `PATH` on
+Fedora), but it keeps using the code in the cloned folder: every `git pull`
+takes effect immediately, without reinstalling. Uninstall with
+`pip uninstall fedora-sentinel-uninstaller`.
+
+### Option C — regular install
+
+```bash
+cd ~/Fedora-Sentinel-Uninstaller
 pip install --user .
 ```
 
-This installs the `fsu` command in `~/.local/bin`. If you prefer not to
-install anything, run it from the cloned folder instead:
-
-```bash
-alias fsu='PYTHONPATH=src python3 -m fsu'
-```
+A fixed copy is installed in `~/.local/bin`; after a `git pull`, run the
+command again to update.
 
 > **Always run FSU as your normal user.** It refuses to run as root, through
 > `sudo` or through `pkexec` — your home folder should never be cleaned by a
