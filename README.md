@@ -9,6 +9,16 @@ installed leave in `~/.config`, `~/.local/share`, `~/.cache`, `~/.local/state`,
 > reversible quarantine, local AI advisor and command-line interface are in
 > place.
 
+## Documentation
+
+The complete, user-friendly documentation is in [`docs/`](docs/README.md):
+
+- [Getting started](docs/getting-started.md) — install and do your first clean-up
+- [Reading the results](docs/reading-the-results.md) — scores, evidence, facts and AI opinions
+- [Command reference](docs/commands.md) · [Troubleshooting & FAQ](docs/troubleshooting.md)
+- [How it works](docs/how-it-works.md) · [Safety model](docs/safety.md) · [AI advisor](docs/ai-advisor.md)
+- [Known limitations](docs/limitations.md) · [Development](docs/development.md)
+
 ## Requirements
 
 - Fedora with **DNF5** (Fedora 41+); tested on Fedora 45
