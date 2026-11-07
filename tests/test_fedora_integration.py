@@ -74,3 +74,10 @@ def test_snapper_detection_does_not_crash(tmp_path: Path) -> None:
     # No Snapper config covers a CI temp dir: snapshots must be reported unavailable.
     assert not status.available
     assert status.reason
+
+
+def test_executable_inventory_real(tmp_path: Path) -> None:
+    from fsu.inventory import ExecutableInventory
+
+    state = ExecutableInventory(tmp_path, [Path("/usr/bin")], opt_root=None, pipx_dirs=()).scan()
+    assert {"dnf5", "rpm"} <= set(state.names)

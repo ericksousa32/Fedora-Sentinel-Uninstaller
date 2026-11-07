@@ -68,6 +68,10 @@ Nothing is ever deleted automatically. Exit codes: `0` success, `1` error,
 - `.desktop` files of installed applications
 - AppImages in `~/AppImages`, `~/Applications`, `~/.local/bin` and user
   launchers in `~/.local/share/applications`
+- programs in `$PATH`, `/opt` and pipx environments - used only as positive
+  evidence: a program with the item's name means the application is installed;
+  not finding one proves nothing (AppImages and Flatpaks often bundle the tools
+  they use)
 
 ### Performance
 

@@ -23,9 +23,10 @@ import os
 import stat
 import time
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
-from fsu import heuristics
+from fsu import heuristics, inventory
 from fsu.heuristics import Match, MatchKind, NameIndex
 from fsu.inventory import (
     DEFAULT_DESKTOP_DIRS,
@@ -34,6 +35,7 @@ from fsu.inventory import (
     AppImageState,
     DesktopIndex,
     DnfHistory,
+    ExecutableInventory,
     FlatpakInventory,
     RpmInventory,
     is_noise_package,
@@ -56,15 +58,28 @@ PBI_HINT = (
 )
 
 
-def measure(path: Path) -> tuple[int, bool]:
-    """Size in bytes of ``path`` without following symlinks or crossing mounts.
+@dataclass(frozen=True)
+class TreeStats:
+    size_bytes: int
+    complete: bool  # False if some part was unreadable or on another mount
+    # Most recent sign of use: file modification/access times and directory
+    # modification times. Directory *access* times are ignored on purpose:
+    # listing a directory (as this scan does) updates them.
+    last_activity: float
 
-    Returns ``(bytes, complete)``; ``complete`` is ``False`` if any part could
-    not be read or lived on another file system.
-    """
+
+def _activity(info: os.stat_result) -> float:
+    if stat.S_ISDIR(info.st_mode):
+        return info.st_mtime
+    return max(info.st_mtime, info.st_atime)
+
+
+def measure(path: Path) -> TreeStats:
+    """Size and last activity of ``path``, without following symlinks or crossing mounts."""
     root_stat = path.lstat()
+    last = _activity(root_stat)
     if not stat.S_ISDIR(root_stat.st_mode):
-        return root_stat.st_size, True
+        return TreeStats(root_stat.st_size, True, last)
     total, complete = 0, True
     stack = [str(path)]
     while stack:
@@ -81,6 +96,7 @@ def measure(path: Path) -> tuple[int, bool]:
                 except OSError:
                     complete = False
                     continue
+                last = max(last, _activity(entry_stat))
                 if stat.S_ISDIR(entry_stat.st_mode):
                     if entry_stat.st_dev != root_stat.st_dev:
                         complete = False  # mount point: do not cross it
@@ -88,7 +104,20 @@ def measure(path: Path) -> tuple[int, bool]:
                     stack.append(entry.path)
                 else:
                     total += entry_stat.st_size
-    return total, complete
+    return TreeStats(total, complete, last)
+
+
+def _read_head(path: Path, size: int) -> bytes:
+    """Read the start of a file without updating its access time when possible."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags | getattr(os, "O_NOATIME", 0))
+    except PermissionError:  # O_NOATIME needs file ownership
+        fd = os.open(path, flags)
+    try:
+        return os.read(fd, size)
+    finally:
+        os.close(fd)
 
 
 def is_generated_stub(path: Path) -> bool:
@@ -104,9 +133,8 @@ def is_generated_stub(path: Path) -> bool:
     try:
         if host.is_symlink() or not host.is_file():
             return False
-        with host.open("rb") as handle:
-            if PBI_MARKER not in handle.read(4096):
-                return False
+        if PBI_MARKER not in _read_head(host, 4096):
+            return False
     except OSError:
         return False
     for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
@@ -158,6 +186,8 @@ class Collector:
         runner: Runner = run_command,
         desktop_dirs: Iterable[Path] | None = None,
         appimage_dirs: Iterable[Path] | None = None,
+        executable_dirs: Iterable[Path] | None = None,
+        opt_root: Path | None = None,
     ) -> None:
         self.home = (home or Path.home()).absolute()
         self._runner = runner
@@ -167,6 +197,8 @@ class Collector:
         if appimage_dirs is None:
             appimage_dirs = tuple(self.home / d for d in APPIMAGE_DIRS)
         self._appimage_dirs = tuple(appimage_dirs)
+        self._executable_dirs = None if executable_dirs is None else tuple(executable_dirs)
+        self._opt_root = opt_root
 
     # -- inventories ---------------------------------------------------------
 
@@ -259,12 +291,13 @@ class Collector:
             return None
         is_link = stat.S_ISLNK(info.st_mode)
         if is_link:
-            size, complete = 0, True
+            size, complete, last_activity = 0, True, info.st_mtime
             evidence.append(
                 Evidence("fsu", "symlink: only the link is considered, never its target")
             )
         else:
-            size, complete = measure(path)
+            stats = measure(path)
+            size, complete, last_activity = stats.size_bytes, stats.complete, stats.last_activity
         if not complete:
             warnings.append(f"size of {path} is partial (unreadable content or another mount).")
         if info.st_uid != os.getuid():
@@ -276,6 +309,7 @@ class Collector:
             action=heuristics.action_for(score),
             size_bytes=size,
             mtime=info.st_mtime,
+            last_activity=last_activity,
             is_symlink=is_link,
             matched_name=matched,
             evidence=tuple(evidence),
@@ -304,6 +338,19 @@ class Collector:
         lap("desktop_files")
         appimages = self._appimages(warnings)
         lap("appimages")
+        dirs = (
+            self._executable_dirs
+            if self._executable_dirs is not None
+            else inventory.default_executable_dirs(self.home)
+        )
+        executables = ExecutableInventory(
+            self.home,
+            dirs,
+            self._opt_root if self._opt_root is not None else inventory.OPT_ROOT,
+            inventory.PIPX_VENV_DIRS,
+        ).scan()
+        warnings.extend(executables.warnings)
+        lap("executables")
 
         installed_exact: set[str] = set(rpm_installed or ()) | set(flatpak_ids or ())
         installed_names: set[str] = installed_exact | desktop_names | appimages.present_names
@@ -314,6 +361,7 @@ class Collector:
         installed_index = NameIndex(installed_names)
         removed_index = NameIndex(removed)
         missing_index = NameIndex(appimages.missing_names)
+        executable_index = NameIndex(executables.names)
         lap("indexes")
 
         scanner = HomeScanner(self.home)
@@ -351,6 +399,12 @@ class Collector:
                 removed_owners = heuristics.owners_matching(path.name, removed)
                 installed_match = installed_index.match(path.name)
                 if installed_match is not None and installed_match.kind is MatchKind.EXACT:
+                    installed_skipped += 1
+                    continue
+                # A program with the same name exists (e.g. /usr/local/bin/konsave):
+                # the application is installed. Its absence proves nothing.
+                program = executable_index.match(path.name)
+                if program is not None and program.kind is MatchKind.EXACT:
                     installed_skipped += 1
                     continue
                 if removed_owners:

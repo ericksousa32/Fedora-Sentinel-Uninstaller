@@ -9,6 +9,8 @@
   applications (avoids false positives such as ``~/.config/Code``).
 * :class:`AppImageInventory` - AppImages present in the usual folders and user
   launchers that point to AppImages (present or gone).
+* :class:`ExecutableInventory` - programs found in $PATH, /opt and pipx
+  environments (positive evidence only).
 
 All classes are read-only.
 """
@@ -16,6 +18,7 @@ All classes are read-only.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 from collections.abc import Iterable, Sequence
@@ -398,3 +401,104 @@ class AppImageInventory:
             stale_launchers=tuple(stale),
             warnings=tuple(warnings),
         )
+
+
+# -- executables ----------------------------------------------------------------
+
+# pipx keeps one virtual environment per installed application.
+PIPX_VENV_DIRS: tuple[Path, ...] = (
+    Path("/opt/pipx/venvs"),
+    Path(".local/share/pipx/venvs"),  # relative: resolved against $HOME
+    Path(".local/pipx/venvs"),
+)
+OPT_ROOT = Path("/opt")
+# Directory names under /opt/<vendor>/ that say nothing about an application.
+_GENERIC_OPT_DIRS = frozenset(
+    {
+        "bin", "sbin", "lib", "lib64", "libexec", "share", "shared", "etc", "include",
+        "var", "log", "logs", "doc", "docs", "data", "resources", "usr", "venvs", "locales",
+    }
+)  # fmt: skip
+
+
+def default_executable_dirs(home: Path) -> list[Path]:
+    """Directories searched for installed programs: absolute $PATH entries.
+
+    Relative entries (such as ``.``) are ignored: they depend on the current
+    directory and are a classic way to shadow real programs.
+    """
+    entries = os.environ.get("PATH", "").split(os.pathsep)
+    dirs: list[Path] = []
+    for entry in entries:
+        if entry and Path(entry).is_absolute() and Path(entry) not in dirs:
+            dirs.append(Path(entry))
+    return dirs
+
+
+@dataclass(frozen=True)
+class ExecutableState:
+    names: dict[str, str]  # program name -> where it was found
+    warnings: tuple[str, ...] = ()
+
+
+class ExecutableInventory:
+    """Programs that exist on this system, by name.
+
+    Used only as *positive* evidence: a program with the item's name proves
+    the application is installed. Not finding one proves nothing (AppImages
+    and Flatpaks often bundle the tools they use), so absence is never used.
+    """
+
+    def __init__(
+        self,
+        home: Path,
+        executable_dirs: Iterable[Path],
+        opt_root: Path | None = OPT_ROOT,
+        pipx_dirs: Iterable[Path] = PIPX_VENV_DIRS,
+    ) -> None:
+        self._home = home
+        self._dirs = tuple(executable_dirs)
+        self._opt_root = opt_root
+        self._pipx_dirs = tuple(d if d.is_absolute() else home / d for d in pipx_dirs)
+
+    def scan(self) -> ExecutableState:
+        names: dict[str, str] = {}
+        warnings: list[str] = []
+
+        def add(name: str, where: Path) -> None:
+            names.setdefault(name, str(where))
+
+        for directory in self._dirs:
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        try:
+                            if entry.is_file() and os.access(entry.path, os.X_OK):
+                                add(entry.name, Path(entry.path))
+                        except OSError:
+                            continue
+            except OSError:
+                continue  # missing PATH entries are normal
+        if self._opt_root is not None and self._opt_root.is_dir():
+            try:
+                for vendor in sorted(self._opt_root.iterdir()):
+                    if not vendor.is_dir():
+                        continue
+                    add(vendor.name, vendor)
+                    try:
+                        children = sorted(vendor.iterdir())
+                    except OSError:
+                        continue
+                    for sub in children:
+                        if sub.is_dir() and sub.name.lower() not in _GENERIC_OPT_DIRS:
+                            add(sub.name, sub)  # /opt/google/chrome -> "chrome"
+            except OSError as exc:
+                warnings.append(f"cannot list {self._opt_root}: {exc}")
+        for venvs in self._pipx_dirs:
+            if venvs.is_dir():
+                try:
+                    for venv in venvs.iterdir():
+                        add(venv.name, venv)
+                except OSError as exc:
+                    warnings.append(f"cannot list {venvs}: {exc}")
+        return ExecutableState(names=names, warnings=tuple(warnings))

@@ -9,6 +9,7 @@ from fsu.inventory import (
     AppImageInventory,
     DesktopIndex,
     DnfHistory,
+    ExecutableInventory,
     FlatpakInventory,
     RpmInventory,
     appimage_base_name,
@@ -16,6 +17,7 @@ from fsu.inventory import (
     nevra_name,
     parse_desktop_file,
 )
+from fsu.inventory import default_executable_dirs as real_default_executable_dirs
 from fsu.system import CommandError
 
 
@@ -215,3 +217,32 @@ def test_appimage_inventory(tmp_path: Path) -> None:
     assert "UsbTool" not in state.missing_names
     assert "Native" not in state.missing_names
     assert state.stale_launchers == (photocraft,)
+
+
+def test_executable_inventory(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    bindir = tmp_path / "bin"
+    _write(bindir / "konsave", "#!/bin/sh\n")
+    (bindir / "konsave").chmod(0o755)
+    _write(bindir / "README", "not a program")  # not executable
+    (bindir / "subdir").mkdir()
+    opt = tmp_path / "opt"
+    (opt / "google/chrome").mkdir(parents=True)
+    (opt / "vendor/bin").mkdir(parents=True)  # generic: ignored
+    pipx = tmp_path / "pipx-venvs"
+    (pipx / "jsondiff").mkdir(parents=True)
+    state = ExecutableInventory(
+        home, [bindir, tmp_path / "missing"], opt_root=opt, pipx_dirs=[pipx]
+    ).scan()
+    assert set(state.names) == {"konsave", "google", "chrome", "vendor", "jsondiff"}
+    assert state.names["konsave"] == str(bindir / "konsave")
+
+
+def test_default_executable_dirs_ignores_relative_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", "/usr/bin:.:bin::/usr/local/bin:/usr/bin")
+    assert real_default_executable_dirs(Path("/home/u")) == [
+        Path("/usr/bin"),
+        Path("/usr/local/bin"),
+    ]

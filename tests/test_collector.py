@@ -328,7 +328,63 @@ def test_measure_file_and_directory(tmp_path: Path) -> None:
     _make(tmp_path / "d/a", 3)
     _make(tmp_path / "d/sub/b", 4)
     (tmp_path / "d/link").symlink_to(tmp_path / "d/a")
-    assert measure(tmp_path / "d/a") == (3, True)
-    size, complete = measure(tmp_path / "d")
-    assert complete
-    assert size == 3 + 4 + len(str((tmp_path / "d/link").readlink()))
+    assert measure(tmp_path / "d/a").size_bytes == 3
+    stats = measure(tmp_path / "d")
+    assert stats.complete
+    assert stats.size_bytes == 3 + 4 + len(str((tmp_path / "d/link").readlink()))
+
+
+def test_last_activity_uses_files_not_directory_access(tmp_path: Path) -> None:
+    item = tmp_path / "app"
+    _make(item / "old.db")
+    _make(item / "sub/recent.log")
+    old, recent = 1_000_000_000, 1_700_000_000
+    os.utime(item / "old.db", (old, old))
+    os.utime(item / "sub/recent.log", (recent - 10, recent))  # written at `recent`
+    os.utime(item / "sub", (old, old))
+    os.utime(item, (2_000_000_000, old))  # directory atime (e.g. from listing) ignored
+    assert measure(item).last_activity == recent
+
+
+def test_file_access_time_counts(tmp_path: Path) -> None:
+    item = tmp_path / "app"
+    _make(item / "data")
+    os.utime(item / "data", (1_600_000_000, 1_000_000_000))  # read later than written
+    os.utime(item, (1_000_000_000, 1_000_000_000))
+    assert measure(item).last_activity == 1_600_000_000
+
+
+def test_candidate_carries_last_activity(home: Path, fake_runner: FakeRunner) -> None:
+    _make(home / ".config/hexchat/servlist.conf")
+    os.utime(home / ".config/hexchat/servlist.conf", (1_500_000_000, 1_500_000_000))
+    os.utime(home / ".config/hexchat", (1_400_000_000, 1_400_000_000))
+    found = _collect(home, fake_runner, home / "none")
+    assert found[".config/hexchat"].last_activity == 1_500_000_000
+
+
+def test_stub_check_does_not_touch_access_time(tmp_path: Path) -> None:
+    app = tmp_path / "org.mozilla.firefox"
+    _pbi_stub(app, None)
+    host = app / "plasma-browser-integration-host"
+    os.utime(host, (1_000_000_000, 1_000_000_000))
+    assert is_generated_stub(app)
+    assert host.stat().st_atime == 1_000_000_000
+
+
+def _exe(path: Path) -> None:
+    _write(path, "#!/bin/sh\n")
+    path.chmod(0o755)
+
+
+def test_installed_program_skips_item(home: Path, fake_runner: FakeRunner, tmp_path: Path) -> None:
+    bindir = tmp_path / "usr-local-bin"
+    _exe(bindir / "konsave")
+    _make(home / ".config/konsave/conf.yaml")
+    _make(home / ".cache/konsave_log.txt")
+    _make(home / ".config/nuvio/settings")  # no program: unchanged (absence proves nothing)
+    report = Collector(home, fake_runner, [], executable_dirs=[bindir]).collect()
+    names = {c.path.name: c for c in report.candidates}
+    assert "konsave" not in names
+    assert "konsave_log.txt" not in names  # via the 'konsave' name variant
+    assert names["nuvio"].score == 0.20
+    assert not any("executable" in e.detail for e in names["nuvio"].evidence)

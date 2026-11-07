@@ -85,6 +85,11 @@ Answer with:
   game launchers and runtimes, AI/GPU libraries, KDE/GNOME components...);
 - "uncertain": the information is not enough.
 
+"days_since_modified" refers to the item itself; "days_since_last_activity"
+is the most recent read or write of any file inside it (access times are
+updated at most once a day). A long inactivity suggests abandonment, but some
+data is legitimately rarely touched.
+
 A recent modification date does NOT prove that the application is still
 installed: applications are often removed shortly after their last use. Do not
 claim that software is installed unless the heuristic evidence says so.
@@ -271,6 +276,11 @@ def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
         "is_symlink": candidate.is_symlink,
         "size_bytes": candidate.size_bytes,
         "days_since_modified": max(0, int((now - candidate.mtime) / 86400)),
+        "days_since_last_activity": (
+            max(0, int((now - candidate.last_activity) / 86400))
+            if candidate.last_activity
+            else None
+        ),
         "first_level_entries": children,
         "total_first_level_entries": total_children,
         "heuristic_score": candidate.score,

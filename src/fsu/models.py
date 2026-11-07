@@ -59,6 +59,8 @@ class Candidate:
     is_symlink: bool
     matched_name: str | None = None
     evidence: tuple[Evidence, ...] = ()
+    # Most recent read/write seen inside the item (0 = unknown).
+    last_activity: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +70,7 @@ class Candidate:
             "action": self.action.value,
             "size_bytes": self.size_bytes,
             "mtime": self.mtime,
+            "last_activity": self.last_activity,
             "is_symlink": self.is_symlink,
             "matched_name": self.matched_name,
             "evidence": [{"source": e.source, "detail": e.detail} for e in self.evidence],

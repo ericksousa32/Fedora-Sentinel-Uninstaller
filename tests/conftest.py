@@ -69,6 +69,22 @@ def default_responses() -> dict[tuple[str, ...], Response]:
     }
 
 
+@pytest.fixture(autouse=True)
+def isolated_executables(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Keep the host's $PATH, /opt and pipx out of every test (determinism).
+
+    Tests of the executable inventory pass their own directories explicitly.
+    """
+    from fsu import inventory
+
+    empty = tmp_path_factory.mktemp("no-executables")
+    monkeypatch.setattr(inventory, "default_executable_dirs", lambda home: [])
+    monkeypatch.setattr(inventory, "OPT_ROOT", empty / "opt")
+    monkeypatch.setattr(inventory, "PIPX_VENV_DIRS", ())
+
+
 @pytest.fixture
 def fake_runner() -> FakeRunner:
     return FakeRunner(default_responses())

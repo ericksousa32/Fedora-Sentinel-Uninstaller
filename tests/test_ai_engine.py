@@ -103,6 +103,17 @@ def test_describe_sends_names_never_contents(home: Path) -> None:
     assert "SECRET-CONTENT" not in json.dumps(data)
 
 
+def test_describe_includes_last_activity(home: Path) -> None:
+    from dataclasses import replace as dc_replace
+
+    item = home / ".cache/x"
+    make(item / "a")
+    now = 1_800_000_000.0
+    cand = dc_replace(candidate(item, home, 0.20), last_activity=now - 10 * 86400)
+    assert describe(cand, now=now)["days_since_last_activity"] == 10
+    assert describe(candidate(item, home, 0.20), now=now)["days_since_last_activity"] is None
+
+
 def test_describe_sanitizes_names(home: Path) -> None:
     item = home / ".config/evil\x1b[31mname"
     make(item / ("x" * 200))
