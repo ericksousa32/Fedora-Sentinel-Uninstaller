@@ -186,6 +186,18 @@ def test_appimage_inventory(tmp_path: Path) -> None:
         f'Exec="{home}/Downloads/photocraft-0.18.0-linux-x86_64.appimage" %F\n'
         "StartupWMClass=ai.storyteller.photocraft\nX-AppImage-Integrate=false\n",
     )
+    _write(  # Icon= with an application ID (a path would carry no information)
+        applications / "upscayl.desktop",
+        f"[Desktop Entry]\nName=Upscayl\nExec={appimages}/upscayl.appimage\n"
+        "Icon=org.upscayl.Upscayl\n",
+    )
+    _write(appimages / "upscayl.appimage", "")
+    _write(
+        applications / "ovd.desktop",
+        f"[Desktop Entry]\nName=Open Video Downloader\nExec={appimages}/ovd.appimage\n"
+        f"Icon={appimages}/.icons/open_video_downloader\nStartupWMClass=open-video-downloader\n",
+    )
+    _write(appimages / "ovd.appimage", "")
     _write(  # on removable media: a missing file proves nothing
         applications / "usb.desktop",
         "[Desktop Entry]\nName=UsbTool\nExec=/run/media/u/usb/usbtool.AppImage\n",
@@ -197,6 +209,8 @@ def test_appimage_inventory(tmp_path: Path) -> None:
     state = AppImageInventory(home, applications, [appimages]).scan()
 
     assert {"lmstudio", "comfy_desktop", "Comfy Desktop"} <= state.present_names
+    assert {"org.upscayl.Upscayl", "open-video-downloader"} <= state.present_names
+    assert not any("/" in name for name in state.present_names)
     assert {"photocraft", "PhotoCraft", "ai.storyteller.photocraft"} <= state.missing_names
     assert "UsbTool" not in state.missing_names
     assert "Native" not in state.missing_names

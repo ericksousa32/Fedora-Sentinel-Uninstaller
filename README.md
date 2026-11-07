@@ -39,6 +39,7 @@ Run it as a **regular user** (never with `sudo`).
 | `~/.var/app/<id>` of a Flatpak that is not installed | 0.95 |
 | Exact name of a removed RPM package | 0.85 |
 | Exact match through a name variant (`<app>rc`, `<app>-...`) | 0.80 |
+| Folder owned by a removed package (e.g. `NuGet` -> `dotnet*`) | 0.80 |
 | Launcher pointing to an AppImage that no longer exists | 0.75 |
 | Similar to a removed package | 0.50 - 0.65 |
 | No known match | 0.20 |
@@ -52,6 +53,12 @@ Run it as a **regular user** (never with `sudo`).
 - `.desktop` files of installed applications
 - AppImages in `~/AppImages`, `~/Applications`, `~/.local/bin` and user
   launchers in `~/.local/share/applications`
+
+### Performance
+
+A full scan takes roughly 20 seconds on a system with ~400 DNF5 transactions.
+Almost all of it is `dnf5 history info --json` itself (measure with
+`--timings`); FSU's own work takes about one second.
 
 ## Safety principles
 

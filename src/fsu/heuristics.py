@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import bisect
 import enum
+import fnmatch
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ THRESHOLD_SNAPSHOT = 0.40
 SCORE_FLATPAK_ORPHAN = 0.95
 SCORE_EXACT_REMOVED = 0.85
 SCORE_VARIANT_REMOVED = 0.80  # exact match through a name variant (e.g. "<app>rc")
+SCORE_OWNER_REMOVED = 0.80  # folder owned (per DIRECTORY_OWNERS) by a removed package
 SCORE_EXACT_STALE_APPIMAGE = 0.75  # launcher points to an AppImage that is gone
 SCORE_PARTIAL_REMOVED_MIN = 0.50
 SCORE_PARTIAL_REMOVED_MAX = 0.65
@@ -62,17 +64,37 @@ GENERIC_ID_PARTS = frozenset(
 
 
 # Folders whose name is not the package name. Keys are normalized item names;
-# values are the packages (or Flatpak IDs) that own the folder. Any owner
-# installed -> installed; otherwise they count as removed names if removed.
+# values are fnmatch patterns of the packages (or Flatpak IDs) that own the
+# folder. Any owner installed -> the folder is in use; otherwise, an owner
+# found among removed packages is evidence of removal.
 DIRECTORY_OWNERS: dict[str, tuple[str, ...]] = {
-    "mozilla": ("firefox", "thunderbird", "seamonkey", "org.mozilla.firefox"),
+    # Browsers and mail
+    "mozilla": ("firefox", "firefox-*", "thunderbird", "seamonkey", "org.mozilla.firefox"),
     "thunderbird": ("thunderbird", "org.mozilla.Thunderbird"),
-    "googlechrome": ("google-chrome-stable", "google-chrome-beta", "google-chrome-unstable"),
-    "chromium": ("chromium", "chromium-freeworld", "org.chromium.Chromium"),
-    "bravesoftware": ("brave-browser", "com.brave.Browser"),
-    "microsoftedge": ("microsoft-edge-stable", "microsoft-edge-beta", "com.microsoft.Edge"),
+    "googlechrome": ("google-chrome-*",),
+    "chromium": ("chromium", "chromium-*", "org.chromium.Chromium"),
+    "bravesoftware": ("brave-browser*", "com.brave.Browser"),
+    "microsoftedge": ("microsoft-edge-*", "com.microsoft.Edge"),
+    # Gaming
     "steam": ("steam", "com.valvesoftware.Steam"),
+    # Development tools
+    "nuget": ("dotnet*", "mono-core", "mono-devel"),  # .NET package cache
+    "wget": ("wget", "wget1*", "wget2*"),  # HSTS database
+    # KDE components whose config file is not named after the package
+    "katevirc": ("kate", "kwrite", "kf6-ktexteditor", "kf5-ktexteditor"),
+    "konsolesshconfig": ("konsole", "konsole5"),
+    "filetypesrc": ("kde-cli-tools*", "plasma-systemsettings", "systemsettings"),
 }
+
+
+def owners_matching(item_name: str, names: Iterable[str]) -> list[str]:
+    """Names among ``names`` that own ``item_name`` per :data:`DIRECTORY_OWNERS`."""
+    patterns = DIRECTORY_OWNERS.get(normalize(item_name))
+    if not patterns:
+        return []
+    return sorted(
+        name for name in names if any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+    )
 
 
 class MatchKind(enum.Enum):

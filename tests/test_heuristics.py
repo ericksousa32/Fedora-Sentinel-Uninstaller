@@ -13,6 +13,7 @@ from fsu.heuristics import (
     compare,
     name_variants,
     normalize,
+    owners_matching,
     partial_removed_score,
     useful_id_part,
 )
@@ -146,6 +147,13 @@ def test_name_index_matches_naive_compare() -> None:
                 expected.kind,
                 round(expected.strength, 9),
             ), item
+
+
+def test_owners_matching_uses_patterns() -> None:
+    names = ["dotnet-runtime-8.0", "bash", "wget2-wget"]
+    assert owners_matching("NuGet", names) == ["dotnet-runtime-8.0"]
+    assert owners_matching("wget", names) == ["wget2-wget"]
+    assert owners_matching("hexchat", names) == []
 
 
 def test_partial_score_range() -> None:

@@ -26,7 +26,7 @@ PROTECTED_PATTERNS: dict[Category, tuple[str, ...]] = {
         "user-tmpfiles.d", "glib-2.0", "QtProject.conf", "Trolltech.conf",
         "Unknown Organization", "xdg-desktop-portal*",
         # KDE Plasma / Frameworks (no package of the same name)
-        "kdeglobals", "kdedefaults", "kde.org", "kwin*", "plasma*", "kscreen*",
+        "kdeglobals", "kdedefaults", "kde.org", "KDE", "kwin*", "plasma*", "kscreen*",
         "ksmserverrc", "kded*rc", "kglobalshortcutsrc", "khotkeysrc", "kcminputrc",
         "kxkbrc", "kactivitymanagerd*", "baloo*", "akonadi*", "kwalletrc",
         "kwalletmanager*", "powermanagementprofilesrc", "powerdevilrc", "breezerc",

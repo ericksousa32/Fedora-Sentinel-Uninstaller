@@ -60,6 +60,11 @@ def populated_home(home: Path) -> Path:
         "[Desktop Entry]\nName=PhotoCraft\n"
         f'Exec="{home}/Downloads/photocraft-0.18.0-linux-x86_64.appimage" %F\n',
     )
+    # Folders not named after their package (DIRECTORY_OWNERS)
+    _make(home / ".local/share/NuGet/v3-cache/x")  # dotnet-runtime-8.0 was removed
+    _make(home / ".local/share/wget/.wget-hsts")  # wget2-wget is installed
+    _make(home / ".config/katevirc")  # kf6-ktexteditor is installed
+    _make(home / ".config/KDE/UserFeedback.conf")  # protected
     # Unknown
     _make(home / ".cache/mystery/blob")
     # Protected
@@ -138,6 +143,10 @@ def test_scoring(populated_home: Path, fake_runner: FakeRunner, desktop_dir: Pat
     assert (photocraft.score, photocraft.action) == (0.75, Action.QUARANTINE)
     assert photocraft.evidence[0].source == "appimage"
 
+    nuget = found[".local/share/NuGet"]
+    assert (nuget.score, nuget.matched_name) == (0.80, "dotnet-runtime-8.0")
+    assert "owned by removed package" in nuget.evidence[0].detail
+
     aspnet = found[".config/aspnetcore"]
     assert aspnet.action is Action.QUARANTINE_WITH_SNAPSHOT
     assert aspnet.matched_name == "aspnetcore-runtime-8.0"
@@ -153,6 +162,9 @@ def test_scoring(populated_home: Path, fake_runner: FakeRunner, desktop_dir: Pat
         ".cache/mozilla",  # owned by installed firefox
         ".config/Code",  # via .desktop
         ".config/LM Studio",  # AppImage in use
+        ".local/share/wget",  # owner wget2-wget installed
+        ".config/katevirc",  # owner kf6-ktexteditor installed
+        ".config/KDE",  # protected
         ".var/app/com.spotify.Client",  # installed Flatpak
         ".var/app/com.google.Chrome",  # Plasma Browser Integration stub
         ".var/app/io.gitlab.librewolf-community",
@@ -170,9 +182,14 @@ def test_scoring(populated_home: Path, fake_runner: FakeRunner, desktop_dir: Pat
 def test_report_counters(populated_home: Path, fake_runner: FakeRunner, desktop_dir: Path) -> None:
     report = _report(populated_home, fake_runner, desktop_dir)
     protected = {str(p.relative_to(populated_home)) for p in report.protected_skipped}
-    assert protected == {".config/dconf", ".local/share/fsu", ".local/share/applications"}
-    # GIMP, kdenlive, dolphinrc, mozilla, Code, LM Studio, Spotify
-    assert report.installed_skipped == 7
+    assert protected == {
+        ".config/dconf",
+        ".config/KDE",
+        ".local/share/fsu",
+        ".local/share/applications",
+    }
+    # GIMP, kdenlive, dolphinrc, mozilla, Code, LM Studio, wget, katevirc, Spotify
+    assert report.installed_skipped == 9
     assert {p.name for p in report.regenerated_skipped} == {
         "com.google.Chrome",
         "io.gitlab.librewolf-community",
@@ -275,6 +292,14 @@ def test_without_history_only_appimage_evidence_scores_high(
     report = _report(populated_home, FakeRunner(responses), desktop_dir)
     above = {c.path.name for c in report.candidates if c.action is not Action.LIST_ONLY}
     assert above == {"org.gimp.GIMP", "photocraft"}
+
+
+def test_owner_rule_without_installed_or_removed_owner(home: Path, desktop_dir: Path) -> None:
+    responses = default_responses()
+    responses[("dnf5", "history", "list")] = "[]"
+    _make(home / ".local/share/NuGet/x")
+    found = _collect(home, FakeRunner(responses), desktop_dir)
+    assert found[".local/share/NuGet"].score == 0.20
 
 
 def test_partial_match_to_installed_caps_score(home: Path, desktop_dir: Path) -> None:

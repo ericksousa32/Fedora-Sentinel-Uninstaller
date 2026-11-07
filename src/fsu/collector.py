@@ -348,19 +348,21 @@ class Collector:
             else:
                 if rpm_installed is None:
                     continue
-                owners = heuristics.DIRECTORY_OWNERS.get(heuristics.normalize(path.name))
-                if owners and any(owner in installed_exact for owner in owners):
+                if heuristics.owners_matching(path.name, installed_exact):
                     installed_skipped += 1
                     continue
-                removed_owner = next((o for o in owners or () if o in removed), None)
+                removed_owners = heuristics.owners_matching(path.name, removed)
                 installed_match = installed_index.match(path.name)
                 if installed_match is not None and installed_match.kind is MatchKind.EXACT:
                     installed_skipped += 1
                     continue
-                if removed_owner is not None:
-                    score, matched = heuristics.SCORE_EXACT_REMOVED, removed_owner
+                if removed_owners:
+                    score, matched = heuristics.SCORE_OWNER_REMOVED, removed_owners[0]
                     evidence.append(
-                        Evidence("dnf5-history", f"folder owned by removed package {removed_owner}")
+                        Evidence(
+                            "dnf5-history",
+                            "folder owned by removed package(s): " + ", ".join(removed_owners),
+                        )
                     )
                 else:
                     score, matched = self._score_rpm_or_appimage(

@@ -111,6 +111,13 @@ class DnfHistory:
         Tries a single call with a range (``min..max``), confirmed to work on
         dnf5 5.4.6. If the DNF5 version rejects it, falls back to one call per
         transaction for the most recent ones, limited by ``fallback_limit``.
+
+        Performance note (measured on Fedora 45, dnf5 5.4.6, ~400 transactions):
+        this call takes ~20 s and returns ~5.8 MB of JSON. The time is spent
+        inside dnf5 itself (``--cacheonly`` makes no difference, so repository
+        metadata is not involved); FSU's own processing takes well under a
+        second. Reading DNF5's internal SQLite database would be faster but
+        depends on an undocumented schema, so the public CLI is kept.
         """
         if not ids:
             return []
@@ -188,6 +195,7 @@ class DesktopEntry:
     path: Path
     name: str = ""
     startup_wm_class: str = ""
+    icon: str = ""
     exec_target: str = ""  # first real program of Exec (wrappers skipped)
     is_flatpak_launcher: bool = False
     is_appimage: bool = False
@@ -227,6 +235,8 @@ def parse_desktop_file(path: Path) -> DesktopEntry:
             entry.name = value
         elif key == "StartupWMClass":
             entry.startup_wm_class = value
+        elif key == "Icon":
+            entry.icon = value
         elif key == "Exec":
             entry.exec_target, entry.is_flatpak_launcher = _exec_target(value)
         elif key.startswith("X-AppImage-"):
@@ -335,6 +345,10 @@ class AppImageInventory:
             names.add(entry.name)
         if entry.startup_wm_class:
             names |= _id_names(entry.startup_wm_class)
+        # Icon= is often the application ID (e.g. ai.storyteller.photocraft);
+        # icon file paths carry no such information.
+        if entry.icon and "/" not in entry.icon:
+            names |= _id_names(entry.icon)
         return {n for n in names if n}
 
     def _is_judgeable_missing(self, target: Path) -> bool:

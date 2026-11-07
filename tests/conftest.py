@@ -54,6 +54,8 @@ RPM_INSTALLED = "\n".join(
         "linuxtoys",
         "dolphin",
         "okular-part",
+        "wget2-wget",
+        "kf6-ktexteditor",
     ]
 )
 
