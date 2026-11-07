@@ -21,10 +21,18 @@ FSU's own [inventory history](how-it-works.md#fsus-inventory-history)).
 | `--model NAME` | Ollama model to use with `--ai` (default: an installed local model). |
 | `--ollama-url URL` | Ollama address (default `http://127.0.0.1:11434`; only this machine is accepted). |
 
+Examples — each box is one action:
+
 ```bash
 fsu scan
+```
+
+```bash
 fsu scan --ai --model gpt-oss:20b
-fsu scan --json > report.json
+```
+
+```bash
+fsu scan --json > ~/fsu-report.json
 ```
 
 ## `fsu quarantine`
@@ -43,11 +51,33 @@ the quarantine, re-checking each one right before the move.
 | `--allow-without-snapshot` | Include medium-confidence items (0.40 – 0.69) even if no snapshot can be taken. |
 | `--no-history`, `--ai`, `--model`, `--ollama-url` | Same as in `fsu scan`. |
 
+Examples — each box is one action. Paste only one at a time: `--apply` waits
+for your `y`/`N` answer, and anything pasted after it would be read as that
+answer.
+
+See the plan (changes nothing):
+
 ```bash
-fsu quarantine                                   # plan only
-fsu quarantine --apply                           # clean high-confidence items
-fsu quarantine --apply --allow-without-snapshot  # also medium items, no snapshot
-fsu quarantine --apply --select ~/.cache/nuvio   # also a list-only item you chose
+fsu quarantine
+```
+
+Clean the high-confidence items:
+
+```bash
+fsu quarantine --apply
+```
+
+Also include medium-confidence items, without a snapshot (you accept the risk):
+
+```bash
+fsu quarantine --apply --allow-without-snapshot
+```
+
+Also include a list-only item you chose (needs a Snapper snapshot) — replace
+the path with yours:
+
+```bash
+fsu quarantine --apply --select ~/.cache/example-app
 ```
 
 What is included in the plan:
@@ -81,10 +111,22 @@ Moves items back to where they came from. It **never overwrites**: if
 something already exists at the original location (for example, the app
 recreated its folder), that item is not restored and FSU tells you.
 
+One item — replace the ID with one shown by `fsu list-quarantine`:
+
 ```bash
-fsu restore 20261107T175332-473f1c       # one item
-fsu restore ID1 ID2                      # several
-fsu restore --all                        # everything
+fsu restore 20261107T175332-473f1c
+```
+
+Several items at once — again, use your own IDs:
+
+```bash
+fsu restore 20261107T175332-473f1c 20261107T175333-41c2b6
+```
+
+Everything:
+
+```bash
+fsu restore --all
 ```
 
 ## `fsu purge`
@@ -99,8 +141,15 @@ command. Always asks for confirmation unless `--yes` is given.
 | `--older-than DAYS` | Items quarantined more than DAYS days ago. |
 | `--yes`, `-y` | Do not ask for confirmation. |
 
+Items quarantined more than 7 days ago:
+
 ```bash
 fsu purge --older-than 7
+```
+
+One item — replace the ID with one shown by `fsu list-quarantine`:
+
+```bash
 fsu purge 20261107T175333-41c2b6
 ```
 

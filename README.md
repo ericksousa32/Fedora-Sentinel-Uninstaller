@@ -27,15 +27,24 @@ The complete, user-friendly documentation is in [`docs/`](docs/README.md):
 
 ## Usage
 
+Each box is complete — copy the whole box into a terminal.
+
+**Run without installing** (an alias in `~/.bashrc` makes `fsu` available in
+every terminal):
+
 ```bash
-git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
-
-# Run without installing (alias kept in every terminal):
-echo "alias fsu='PYTHONPATH=\$HOME/Fedora-Sentinel-Uninstaller/src python3 -m fsu'" >> ~/.bashrc
+[ -d ~/Fedora-Sentinel-Uninstaller ] || git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+grep -qs "alias fsu=" ~/.bashrc || echo "alias fsu='PYTHONPATH=\$HOME/Fedora-Sentinel-Uninstaller/src python3 -m fsu'" >> ~/.bashrc
 source ~/.bashrc
+fsu --version
+```
 
-# ...or install the `fsu` command in ~/.local/bin, following the repository:
+**Or install the `fsu` command** in `~/.local/bin`, following the repository:
+
+```bash
+[ -d ~/Fedora-Sentinel-Uninstaller ] || git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
 pip install --user -e ~/Fedora-Sentinel-Uninstaller
+fsu --version
 ```
 
 See [Getting started](docs/getting-started.md#2-get-fsu) for all options.
@@ -196,10 +205,17 @@ Score policy:
 FSU never configures Snapper. It uses a config whose subvolume is the mount
 point of `$HOME` and that the user may access. To enable it (once, as admin):
 
+Create the configuration for your home and allow your user to use it (asks
+for your password once):
+
 ```bash
-sudo snapper -c home create-config /home
-sudo snapper -c home set-config ALLOW_USERS=$USER SYNC_ACL=yes
-# optional: no hourly timeline snapshots, only the ones FSU asks for
+sudo snapper -c home create-config /home && sudo snapper -c home set-config ALLOW_USERS=$USER SYNC_ACL=yes
+```
+
+Optional — keep only the snapshots FSU asks for, with no automatic hourly
+ones:
+
+```bash
 sudo snapper -c home set-config TIMELINE_CREATE=no
 ```
 
@@ -211,8 +227,13 @@ An optional second opinion from a model running in [Ollama](https://ollama.com)
 on the same machine:
 
 ```bash
-fsu scan --ai                       # uses an installed model
-fsu scan --ai --model gemma4:12b
+fsu scan --ai
+```
+
+To choose the model (any installed local model):
+
+```bash
+fsu scan --ai --model gpt-oss:20b
 ```
 
 It is **off by default**: in tests on a real system, models were right on
@@ -279,10 +300,20 @@ These come from testing on a real Fedora 45 (KDE Plasma) system.
 
 ## Development
 
+Set up a development environment (run once; creates `.venv` inside the
+repository):
+
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-pytest -m "not fedora" && ruff check . && ruff format --check . && mypy
+cd ~/Fedora-Sentinel-Uninstaller
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+```
+
+Run all checks (the same ones CI runs, except the Fedora-only tests):
+
+```bash
+cd ~/Fedora-Sentinel-Uninstaller
+.venv/bin/pytest -m "not fedora" && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy
 ```
 
 Tests marked `fedora` run against real `rpm`/`dnf5` (CI job in a

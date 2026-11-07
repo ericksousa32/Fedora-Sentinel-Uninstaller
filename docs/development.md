@@ -24,10 +24,20 @@ Data flows one way: `cli` → `collector` (→ `inventory`, `history`,
 
 ## Setting up
 
+Set up a development environment (run once; creates `.venv` inside the
+repository):
+
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-pytest -m "not fedora" && ruff check . && ruff format --check . && mypy
+cd ~/Fedora-Sentinel-Uninstaller
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+```
+
+Run all checks (the same ones CI runs, except the Fedora-only tests):
+
+```bash
+cd ~/Fedora-Sentinel-Uninstaller
+.venv/bin/pytest -m "not fedora" && .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy
 ```
 
 - Python 3.10+; **no runtime dependencies** (standard library only).

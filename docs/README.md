@@ -12,13 +12,15 @@ when you explicitly ask.
 
 ## FSU in one minute
 
-```bash
-fsu scan                  # what is left behind? (changes nothing)
-fsu quarantine            # what would be cleaned? (changes nothing)
-fsu quarantine --apply    # clean up — asks for confirmation first
-fsu restore --all         # changed your mind? everything goes back
-fsu purge --older-than 7  # days later, when you are sure: delete for good
-```
+| Step | Command | Changes anything? |
+|---|---|---|
+| What is left behind? | `fsu scan` | No |
+| What would be cleaned? | `fsu quarantine` | No |
+| Clean up | `fsu quarantine --apply` | Moves items to quarantine, after you confirm |
+| Changed your mind? | `fsu restore --all` | Puts everything back |
+| Days later, when sure | `fsu purge --older-than 7` | Deletes for good, after you confirm |
+
+New here? Start with [Getting started](getting-started.md).
 
 ## Guides
 

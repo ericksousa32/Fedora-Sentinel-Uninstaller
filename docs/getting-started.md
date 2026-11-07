@@ -13,62 +13,64 @@ minutes, most of which is reading what FSU found.
 
 ## 2. Get FSU
 
-First, download it:
-
-```bash
-git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
-```
-
-Then choose **one** of the ways below to get the `fsu` command.
+Choose **one** of the options below. Each box is complete: copy the whole box
+and paste it into a terminal. It downloads FSU (if it is not there yet), sets
+it up and finishes by printing the version, so you can see it worked.
 
 ### Option A — run without installing (recommended while testing)
 
-Nothing is installed; FSU runs straight from the folder you cloned. Add an
-alias to your shell so `fsu` works in every terminal:
+Nothing is installed; FSU runs straight from the downloaded folder. An alias
+in your `~/.bashrc` makes the `fsu` command available in every terminal, from
+any directory.
 
 ```bash
-echo "alias fsu='PYTHONPATH=\$HOME/Fedora-Sentinel-Uninstaller/src python3 -m fsu'" >> ~/.bashrc
+[ -d ~/Fedora-Sentinel-Uninstaller ] || git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+grep -qs "alias fsu=" ~/.bashrc || echo "alias fsu='PYTHONPATH=\$HOME/Fedora-Sentinel-Uninstaller/src python3 -m fsu'" >> ~/.bashrc
 source ~/.bashrc
+fsu --version
 ```
 
-- The alias uses the **full path** of the folder, so `fsu` works from any
-  directory. If you cloned somewhere else, adjust the path.
-- `source ~/.bashrc` applies it to the current terminal; new terminals pick
-  it up automatically. (Using zsh? Write to `~/.zshrc` instead.)
-- To update: `git -C ~/Fedora-Sentinel-Uninstaller pull` — nothing else.
-- To remove: delete the `alias fsu=…` line from `~/.bashrc` and the folder.
+- To update later, paste: `git -C ~/Fedora-Sentinel-Uninstaller pull`
+- To undo: delete the `alias fsu=…` line from `~/.bashrc` and the folder.
+- Using zsh instead of bash? Replace `~/.bashrc` with `~/.zshrc` in the box.
 
-Just want to try it once, without the alias? From inside the cloned folder:
+> An alias typed directly in a terminal (without saving it in `~/.bashrc`)
+> only lasts until that terminal is closed. If `fsu` suddenly "is not found",
+> that is why — paste the Option A box again.
+
+### Option A′ — just try it once, without any setup
+
+Runs a single scan from the downloaded folder; nothing is configured.
 
 ```bash
-cd ~/Fedora-Sentinel-Uninstaller
-PYTHONPATH=src python3 -m fsu scan
+[ -d ~/Fedora-Sentinel-Uninstaller ] || git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+cd ~/Fedora-Sentinel-Uninstaller && PYTHONPATH=src python3 -m fsu scan
 ```
 
-> An alias typed directly in a terminal (without `>> ~/.bashrc`) only lasts
-> until that terminal is closed — if `fsu` stops being found, this is why.
+### Option B — install the `fsu` command, following the repository
 
-### Option B — install, following the repository (editable)
+Installs `fsu` in `~/.local/bin` (already in your `PATH` on Fedora), but keeps
+using the downloaded folder: every update takes effect without reinstalling.
 
 ```bash
-cd ~/Fedora-Sentinel-Uninstaller
-pip install --user -e .
+[ -d ~/Fedora-Sentinel-Uninstaller ] || git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+pip install --user -e ~/Fedora-Sentinel-Uninstaller
+fsu --version
 ```
 
-This installs the `fsu` command in `~/.local/bin` (already in your `PATH` on
-Fedora), but it keeps using the code in the cloned folder: every `git pull`
-takes effect immediately, without reinstalling. Uninstall with
-`pip uninstall fedora-sentinel-uninstaller`.
+- To update later, paste: `git -C ~/Fedora-Sentinel-Uninstaller pull`
+- To undo, paste: `pip uninstall -y fedora-sentinel-uninstaller`
 
-### Option C — regular install
+### Option C — regular install (a fixed copy)
 
 ```bash
-cd ~/Fedora-Sentinel-Uninstaller
-pip install --user .
+[ -d ~/Fedora-Sentinel-Uninstaller ] || git clone -b dev https://github.com/ericksousa32/Fedora-Sentinel-Uninstaller.git ~/Fedora-Sentinel-Uninstaller
+pip install --user ~/Fedora-Sentinel-Uninstaller
+fsu --version
 ```
 
-A fixed copy is installed in `~/.local/bin`; after a `git pull`, run the
-command again to update.
+- To update later, paste:
+  `git -C ~/Fedora-Sentinel-Uninstaller pull && pip install --user ~/Fedora-Sentinel-Uninstaller`
 
 > **Always run FSU as your normal user.** It refuses to run as root, through
 > `sudo` or through `pkexec` — your home folder should never be cleaned by a
@@ -145,12 +147,23 @@ moved (is it still there? is a program using it right now?). Items move to
 ## 6. Live with it for a few days
 
 Use your computer normally. If an application complains that its settings
-are gone, put them back:
+are gone, put them back.
+
+See what is in quarantine and each item's ID:
 
 ```bash
-fsu list-quarantine          # find the item's ID
+fsu list-quarantine
+```
+
+Put back one item — replace the ID with one shown by `fsu list-quarantine`:
+
+```bash
 fsu restore 20261107T175332-473f1c
-# or put everything back:
+```
+
+Or put **everything** back:
+
+```bash
 fsu restore --all
 ```
 

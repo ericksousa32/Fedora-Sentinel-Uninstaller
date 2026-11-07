@@ -99,10 +99,17 @@ FSU never configures Snapper (that needs administrator rights). It uses a
 Snapper configuration whose subvolume is the mount point of your home and that
 your user is allowed to use. On Fedora, an administrator can set this up once:
 
+Create the configuration for your home and allow your user to use it (asks
+for your password once):
+
 ```bash
-sudo snapper -c home create-config /home
-sudo snapper -c home set-config ALLOW_USERS=$USER SYNC_ACL=yes
-# optional: only the snapshots FSU asks for, no hourly ones
+sudo snapper -c home create-config /home && sudo snapper -c home set-config ALLOW_USERS=$USER SYNC_ACL=yes
+```
+
+Optional — keep only the snapshots FSU asks for, with no automatic hourly
+ones:
+
+```bash
 sudo snapper -c home set-config TIMELINE_CREATE=no
 ```
 
