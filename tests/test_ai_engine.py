@@ -103,15 +103,12 @@ def test_describe_sends_names_never_contents(home: Path) -> None:
     assert "SECRET-CONTENT" not in json.dumps(data)
 
 
-def test_describe_includes_last_activity(home: Path) -> None:
-    from dataclasses import replace as dc_replace
-
+def test_describe_sends_no_dates(home: Path) -> None:
+    """Dates were misused in every real test ("recent, so in use"; "old, so residue")."""
     item = home / ".cache/x"
     make(item / "a")
-    now = 1_800_000_000.0
-    cand = dc_replace(candidate(item, home, 0.20), last_activity=now - 10 * 86400)
-    assert describe(cand, now=now)["days_since_last_write"] == 10
-    assert describe(candidate(item, home, 0.20), now=now)["days_since_last_write"] is None
+    data = describe(candidate(item, home, 0.20), now=1_800_000_000.0)
+    assert not any("day" in key or "time" in key for key in data)
 
 
 def test_describe_sanitizes_names(home: Path) -> None:
@@ -270,12 +267,11 @@ def test_same_application_is_judged_once(ollama: FakeOllama, home: Path) -> None
     assert [c.path for c in review.candidates] == paths  # original order kept
 
 
-def test_prompt_mentions_recency_is_not_proof(ollama: FakeOllama, home: Path) -> None:
+def test_prompt_explains_evidence_strength(ollama: FakeOllama, home: Path) -> None:
     make(home / ".cache/x/a")
     _review(ollama, home, [home / ".cache/x"], [0.20])
-    system = ollama.generate_bodies()[0]["system"]
-    assert "nor that it was removed" in system
-    assert "they prove\nneither" in system or "prove neither" in system.replace("\n", " ")
+    system = " ".join(ollama.generate_bodies()[0]["system"].split())
+    assert "a weak name similarity is a hint, not proof" in system
 
 
 def test_rationale_is_cut_at_a_word_boundary(ollama: FakeOllama, home: Path) -> None:
@@ -430,8 +426,8 @@ def test_model_input_has_no_score_size_or_negative_evidence(home: Path) -> None:
         size_bytes=5000,
         evidence=(
             Evidence("heuristic", "no known match"),
-            Evidence("installed", "similar to installed X (0.89)"),
-            Evidence("dnf5-history", "similar to removed package y (0.5)"),
+            Evidence("installed", "strong name similarity (89%) to installed app 'X'"),
+            Evidence("dnf5-history", "weak name similarity (50%) to removed package 'y'"),
             Evidence("facts", "no program, launcher or running process with exactly this name"),
             Evidence("fsu", "owned by another user (uid 0)"),
         ),
@@ -440,6 +436,6 @@ def test_model_input_has_no_score_size_or_negative_evidence(home: Path) -> None:
     assert "heuristic_score" not in data
     assert "size_bytes" not in data
     assert data["evidence"] == [
-        "similar to installed X (0.89)",
-        "similar to removed package y (0.5)",
+        "strong name similarity (89%) to installed app 'X'",
+        "weak name similarity (50%) to removed package 'y'",
     ]

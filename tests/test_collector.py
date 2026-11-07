@@ -404,3 +404,18 @@ def test_installed_program_skips_item(home: Path, fake_runner: FakeRunner, tmp_p
     assert "konsave_log.txt" not in names  # via the 'konsave' name variant
     assert names["nuvio"].score == 0.20
     assert not any("executable" in e.detail for e in names["nuvio"].evidence)
+
+
+@pytest.mark.parametrize(
+    ("strength", "text"),
+    [
+        (0.89, "strong name similarity (89%) to installed app 'Comfy Desktop'"),
+        (0.72, "moderate name similarity (72%) to installed app 'Comfy Desktop'"),
+        (0.43, "weak name similarity (43%) to installed app 'Comfy Desktop'"),
+    ],
+)
+def test_similarity_text(strength: float, text: str) -> None:
+    from fsu.collector import similarity_text
+
+    assert similarity_text(strength, "installed app", "Comfy Desktop") == text
+    assert "0." not in text  # no bare ratio that reads like a version number

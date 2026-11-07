@@ -92,8 +92,8 @@ Answer with:
 - "uncertain": the data supports neither answer.
 
 Do not claim that software is installed, nor that it was removed, unless the
-data supports it. Dates only tell when files were last written; they prove
-neither. "evidence" lists only positive findings of the tool; an empty list
+data supports it. "evidence" lists only positive findings of the tool, each
+with its strength; a weak name similarity is a hint, not proof. An empty list
 means nothing was found, which is not evidence either way.
 
 When the data supports neither answer, answer "uncertain". Keep the rationale
@@ -304,7 +304,7 @@ def group_key(candidate: Candidate) -> str:
 
 def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
     """Metadata sent to the model: names and numbers only, never file contents."""
-    now = time.time() if now is None else now
+    del now  # dates are not sent to the model (see below)
     children: list[str] = []
     total_children = 0
     path = candidate.path
@@ -324,19 +324,14 @@ def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
         "location": ROOT_LABELS[candidate.category],
         "category": candidate.category.value,
         "is_symlink": candidate.is_symlink,
-        "days_since_modified": max(0, int((now - candidate.mtime) / 86400)),
-        "days_since_last_write": (
-            max(0, int((now - candidate.last_activity) / 86400))
-            if candidate.last_activity
-            else None
-        ),
         "first_level_entries": children,
         "total_first_level_entries": total_children,
         # Only positive findings. Deliberately NOT sent, to avoid biasing the
         # model (each was observed in real tests): the heuristic score (read as
         # "evidence of residue" when it only means "no evidence"), the size
-        # ("large, so active"), and negative findings such as "no known match"
-        # or the user-facing facts ("no program with this name").
+        # ("large, so active"), dates ("written 2 days ago, so in use" / "old,
+        # so residue", despite the prompt saying dates prove neither), and
+        # negative findings such as "no known match" or the user-facing facts.
         "evidence": [
             _clean(e.detail, 200) for e in candidate.evidence if e.source in POSITIVE_SOURCES
         ],

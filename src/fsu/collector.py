@@ -297,7 +297,7 @@ class Collector:
                 detail = f"removed package: {rpm.name}" + _via(rpm)
             else:
                 score = heuristics.partial_removed_score(rpm.strength)
-                detail = f"similar to removed package {rpm.name} ({rpm.strength:.2f})" + _via(rpm)
+                detail = similarity_text(rpm.strength, "removed package", rpm.name) + _via(rpm)
             options.append((score, rpm.name, Evidence("dnf5-history", detail)))
 
         app = missing_appimages.match(name, use_variants)
@@ -307,7 +307,7 @@ class Collector:
                 detail = f"launcher points to a missing AppImage: {app.name}" + _via(app)
             else:
                 score = heuristics.partial_removed_score(app.strength)
-                detail = f"similar to missing AppImage {app.name} ({app.strength:.2f})" + _via(app)
+                detail = similarity_text(app.strength, "missing AppImage", app.name) + _via(app)
             options.append((score, app.name, Evidence("appimage", detail)))
 
         seen = gone.match(name, use_variants) if gone is not None else None
@@ -543,8 +543,10 @@ class Collector:
                     evidence.append(
                         Evidence(
                             "installed",
-                            f"similar to installed {installed_match.name} "
-                            f"({installed_match.strength:.2f})" + _via(installed_match),
+                            similarity_text(
+                                installed_match.strength, "installed app", installed_match.name
+                            )
+                            + _via(installed_match),
                         )
                     )
 
@@ -595,6 +597,22 @@ class Collector:
             timings=timings,
             low_confidence_hidden=hidden,
         )
+
+
+def similarity_text(strength: float, what: str, name: str) -> str:
+    """Unambiguous, self-describing wording for a partial name match.
+
+    A bare "(0.89)" was read by a model as a version number ("Comfy Desktop
+    0.89"), and weak similarities were taken as proof; the strength is now
+    spelled out.
+    """
+    if strength >= heuristics.SIMILARITY_STRONG:
+        label = "strong"
+    elif strength >= heuristics.SIMILARITY_MODERATE:
+        label = "moderate"
+    else:
+        label = "weak"
+    return f"{label} name similarity ({strength:.0%}) to {what} '{name}'"
 
 
 def _with_facts(

@@ -39,6 +39,10 @@ SCORE_PARTIAL_REMOVED_MAX = 0.65
 SCORE_NO_MATCH = 0.20
 SCORE_CAP_PARTIAL_INSTALLED = 0.30
 
+# Labels for partial-match strength in user- and model-facing evidence.
+SIMILARITY_STRONG = 0.85
+SIMILARITY_MODERATE = 0.60
+
 # Minimum normalized length to accept a prefix match.
 MIN_PREFIX_LEN = 4
 # Minimum similarity (difflib ratio) to accept an approximate match.
