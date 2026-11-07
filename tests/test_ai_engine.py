@@ -367,3 +367,22 @@ def test_group_key(home: Path, a: str, b: str, same: bool) -> None:
     ka = group_key(candidate(home / a, home, 0.20))
     kb = group_key(candidate(home / b, home, 0.20))
     assert (ka == kb) is same
+
+
+def test_facts_are_never_sent_to_the_model(home: Path) -> None:
+    from dataclasses import replace as dc_replace
+
+    from fsu.models import Evidence
+
+    item = home / ".local/share/umu"
+    make(item / "x")
+    cand = candidate(item, home, 0.20)
+    cand = dc_replace(
+        cand,
+        evidence=(
+            Evidence("heuristic", "no known match"),
+            Evidence("facts", "no program, launcher or running process with exactly this name"),
+        ),
+    )
+    sent = describe(cand)["heuristic_evidence"]
+    assert sent == ["no known match"]

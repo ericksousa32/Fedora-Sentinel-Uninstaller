@@ -92,10 +92,6 @@ most recent modification of any file inside it. Reads are not tracked. A long
 time without writes suggests abandonment, but some data is legitimately rarely
 written.
 
-Not finding a program, launcher or process with the item's name is WEAK
-evidence: applications often bundle the tools they use (AppImages, Flatpaks)
-or use a different name.
-
 A recent modification date does NOT prove that the application is still
 installed: applications are often removed shortly after their last use. Do not
 claim that software is installed unless the heuristic evidence says so.
@@ -339,7 +335,12 @@ def describe(candidate: Candidate, now: float | None = None) -> dict[str, Any]:
         "first_level_entries": children,
         "total_first_level_entries": total_children,
         "heuristic_score": candidate.score,
-        "heuristic_evidence": [_clean(e.detail, 200) for e in candidate.evidence],
+        # "facts" (e.g. "no program with this name found") are weak negative
+        # evidence: shown to people, never sent to the model, which treats an
+        # absence as proof even when told otherwise (observed in real tests).
+        "heuristic_evidence": [
+            _clean(e.detail, 200) for e in candidate.evidence if e.source != "facts"
+        ],
     }
 
 

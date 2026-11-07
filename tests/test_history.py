@@ -158,7 +158,9 @@ def test_list_only_items_get_facts(home: Path) -> None:
     facts = _collect(home)[".cache/mystery"].evidence[-1]
     assert facts.source == "facts"
     assert "last write 0 day(s) ago" in facts.detail
-    assert "no program, launcher or running process named 'mystery' found" in facts.detail
+    assert "no program, launcher or running process with exactly this name ('mystery')" in (
+        facts.detail
+    )
 
 
 def test_running_process_is_reported(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

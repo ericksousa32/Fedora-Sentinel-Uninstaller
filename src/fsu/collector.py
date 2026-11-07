@@ -602,8 +602,9 @@ def _with_facts(
 ) -> Candidate:
     """Objective facts for a list-only item, to help the user decide.
 
-    Facts never change the score: a missing program proves nothing (apps often
-    bundle their tools), and a partial name match may be a coincidence.
+    Facts never change the score and are never sent to the AI: a missing
+    program proves nothing (apps often bundle their tools or use other names),
+    yet models treat such absences as proof. They are for the user only.
     """
     name = candidate.path.name
     found = []
@@ -616,7 +617,7 @@ def _with_facts(
         facts = [f"last write {days} day(s) ago"]
     else:
         facts = []
-    facts += found or [f"no program, launcher or running process named '{name}' found"]
+    facts += found or [f"no program, launcher or running process with exactly this name ('{name}')"]
     return replace(candidate, evidence=(*candidate.evidence, Evidence("facts", "; ".join(facts))))
 
 

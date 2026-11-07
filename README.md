@@ -109,7 +109,12 @@ evidence (0.75) for the folders it left behind.
 List-only items also show objective **facts** that never change the score:
 the last write, and whether a program, launcher or running process with the
 item's name exists. Not finding one is weak evidence (apps often bundle their
-tools), so it is shown, not scored.
+tools or use other names), so it is shown, not scored.
+
+**Rule: weak negative evidence is shown to people, never scored and never sent
+to the AI.** In real tests, a model told that "no program named X was found"
+called an in-use 3.6 GiB game runtime a residue, even though its prompt said
+such absences are weak evidence.
 
 ## Sources of truth
 
