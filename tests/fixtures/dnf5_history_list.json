@@ -1,0 +1,132 @@
+[
+  {
+    "id": 405,
+    "command_line": "dnf install -y /tmp/linuxtoys-7.9.8-1.x86_64.rpm",
+    "start_time": 1794057077,
+    "end_time": 1794057081,
+    "user_id": 0,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 2
+  },
+  {
+    "id": 404,
+    "command_line": "dnf install -y /tmp/linuxtoys-7.9.7-1.x86_64.rpm",
+    "start_time": 1793961786,
+    "end_time": 1793961790,
+    "user_id": 0,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 2
+  },
+  {
+    "id": 403,
+    "command_line": "dnf install -y /tmp/linuxtoys-7.9.6-1.x86_64.rpm",
+    "start_time": 1793832784,
+    "end_time": 1793832788,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 2
+  },
+  {
+    "id": 402,
+    "command_line": "dnf install -y /tmp/linuxtoys-7.9.5-1.x86_64.rpm",
+    "start_time": 1793788402,
+    "end_time": 1793788406,
+    "user_id": 0,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 2
+  },
+  {
+    "id": 401,
+    "command_line": "dnf install -y /tmp/linuxtoys-7.9.4-1.x86_64.rpm",
+    "start_time": 1793757744,
+    "end_time": 1793757748,
+    "user_id": 0,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 2
+  },
+  {
+    "id": 400,
+    "command_line": "dnf update --refresh",
+    "start_time": 1793755130,
+    "end_time": 1793755132,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 10
+  },
+  {
+    "id": 399,
+    "command_line": "dnf update --refresh",
+    "start_time": 1793755010,
+    "end_time": 1793755012,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 4
+  },
+  {
+    "id": 398,
+    "command_line": "dnf remove kwebkitpart",
+    "start_time": 1793736761,
+    "end_time": 1793736763,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 9
+  },
+  {
+    "id": 397,
+    "command_line": "dnf remove aspnetcore-runtime-8.0",
+    "start_time": 1793736744,
+    "end_time": 1793736746,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 10
+  },
+  {
+    "id": 396,
+    "command_line": "dnf autoremove",
+    "start_time": 1793736628,
+    "end_time": 1793736630,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 8
+  },
+  {
+    "id": 395,
+    "command_line": "dnf install -y /tmp/linuxtoys-7.9.3-1.x86_64.rpm",
+    "start_time": 1793735204,
+    "end_time": 1793735208,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 2
+  },
+  {
+    "id": 394,
+    "command_line": "dnf upgrade --refresh",
+    "start_time": 1793734848,
+    "end_time": 1793734850,
+    "user_id": 1000,
+    "status": "Ok",
+    "releasever": "45",
+    "altered_count": 8
+  },
+  {
+    "id": 393,
+    "command_line": "dnf system-upgrade download --releasever=45",
+    "start_time": 1793733790,
+    "end_time": 1793734513,
+    "user_id": 0,
+    "status": "Ok",
+    "releasever": "44",
+    "altered_count": 5026
+  }
+]

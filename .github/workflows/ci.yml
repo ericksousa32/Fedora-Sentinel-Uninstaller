@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check . && ruff format --check .
+      - name: Types
+        run: mypy
+      - name: Tests (no Fedora)
+        run: pytest -m "not fedora"
+
+  fedora:
+    name: Integration (real Fedora)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependencies
+        run: dnf5 -y install python3 python3-pytest snapper
+      - name: Create a real removal transaction in the DNF5 history
+        run: |
+          dnf5 -y install cowsay
+          dnf5 -y remove cowsay
+          cat /etc/fedora-release
+          dnf5 --version | head -1
+      - name: Integration tests
+        env:
+          PYTHONPATH: src
+          FSU_EXPECT_REMOVED: cowsay
+        run: python3 -m pytest -m fedora -v
+      - name: CLI smoke test as a regular user
+        run: |
+          useradd -m fsutest
+          cp -r . /home/fsutest/repo && chown -R fsutest: /home/fsutest/repo
+          runuser -u fsutest -- bash -euxc '
+            cd ~/repo
+            export PYTHONPATH=src
+            mkdir -p ~/.config/cowsay && echo data > ~/.config/cowsay/file
+            mkdir -p ~/.cowsay ~/.config/autostart
+            printf "[Desktop Entry]\nExec=/opt/gone/bin/gone\n" > ~/.config/autostart/gone.desktop
+            mkdir -p ~/AppImages ~/.config/fsutestapp && touch ~/AppImages/fsutestapp-1.0.AppImage
+            python3 -m fsu scan > /dev/null          # records the AppImage in the history
+            rm ~/AppImages/fsutestapp-1.0.AppImage
+            python3 -m fsu scan | grep -A1 "/.config/fsutestapp" | grep -q "was present on"
+            python3 -m fsu scan
+            python3 -m fsu scan --json | python3 -c "import json,sys; c={x[\"category\"] for x in json.load(sys.stdin)[\"candidates\"]}; assert {\"config\",\"home\",\"launcher\"} <= c, c"
+            python3 -m fsu quarantine
+            test -d ~/.config/cowsay
+            python3 -m fsu quarantine --apply --yes
+            test ! -e ~/.config/cowsay && test ! -e ~/.cowsay && test ! -e ~/.config/autostart/gone.desktop
+            python3 -m fsu list-quarantine
+            python3 -m fsu restore --all
+            test "$(cat ~/.config/cowsay/file)" = data
+            test -d ~/.cowsay && test -f ~/.config/autostart/gone.desktop
+          '
+          # FSU must refuse to run as root
+          if PYTHONPATH=src python3 -m fsu scan; then exit 1; fi
